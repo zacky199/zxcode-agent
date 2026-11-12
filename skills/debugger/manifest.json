@@ -1,0 +1,8 @@
+{
+  "name": "Debugger Pro",
+  "description": "Systematic bug hunter: reproduce, isolate, fix, verify.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["debugging", "bug-fix", "troubleshooting"]
+}

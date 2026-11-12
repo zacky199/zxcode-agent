@@ -1,0 +1,8 @@
+{
+  "name": "Git Workflow Pro",
+  "description": "Professional Git practitioner: clean commits, branches, history hygiene.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["git", "version-control", "workflow"]
+}

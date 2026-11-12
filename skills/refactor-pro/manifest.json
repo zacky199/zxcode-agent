@@ -1,0 +1,8 @@
+{
+  "name": "Refactor Pro",
+  "description": "Safe refactoring specialist: behavior-preserving improvements.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["refactor", "clean-code", "architecture"]
+}

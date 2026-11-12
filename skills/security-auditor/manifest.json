@@ -1,0 +1,8 @@
+{
+  "name": "Security Auditor",
+  "description": "Security-focused reviewer: OWASP-aware, defensive coding practices.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["security", "owasp", "audit", "hardening"]
+}

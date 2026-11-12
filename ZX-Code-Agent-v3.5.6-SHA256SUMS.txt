@@ -1,0 +1,2 @@
+0b5d4981b7fad27a04c0456b042ef9db9c6d007ce6cd32a27ab15eb5e0b918f2  ZX-Code-Agent-v3.5.6.zip
+59321dbe716f028c2cf45b8a72c5407eb6318e3a585d07a5fdab52a3b12657e7  ZX-Code-Agent-v3.5.6.patch

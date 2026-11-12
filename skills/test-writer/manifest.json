@@ -1,0 +1,8 @@
+{
+  "name": "Test Writer",
+  "description": "Professional test engineer: meaningful unit/integration tests.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["testing", "pytest", "jest", "quality"]
+}

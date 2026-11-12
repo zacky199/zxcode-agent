@@ -1,0 +1,8 @@
+{
+  "name": "UI-UX Pro Max",
+  "description": "Senior UI/UX engineer persona: modern, accessible, beautiful interfaces.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["ui", "ux", "frontend", "design"]
+}

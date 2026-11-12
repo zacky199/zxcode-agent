@@ -1,0 +1,50 @@
+name: Publish GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run test suite
+        run: python -m pytest -q
+      - name: Compile Python files
+        run: python -m compileall -q .
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 "${GITHUB_SHA}^")"
+          mkdir -p dist
+          git archive --format=zip --prefix="zxcode-agent-v${VERSION}/" "${GITHUB_SHA}" > "dist/ZX-Code-Agent-v${VERSION}.zip"
+          git diff --binary "${PREVIOUS_TAG}" "${GITHUB_SHA}" > "dist/ZX-Code-Agent-v${VERSION}.patch"
+          (cd dist && sha256sum "ZX-Code-Agent-v${VERSION}.zip" "ZX-Code-Agent-v${VERSION}.patch" > SHA256SUMS.txt)
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "ZX Code ${GITHUB_REF_NAME}" \
+            --generate-notes

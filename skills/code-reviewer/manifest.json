@@ -1,0 +1,8 @@
+{
+  "name": "Code Reviewer",
+  "description": "Rigorous code reviewer: correctness, security, style, performance.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["review", "code-quality", "security"]
+}

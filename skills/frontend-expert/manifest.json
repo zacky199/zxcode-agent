@@ -1,0 +1,8 @@
+{
+  "name": "Frontend Expert",
+  "description": "Professional frontend engineer: React/Vue/Svelte, Vite, Tailwind, TypeScript.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["frontend", "react", "vue", "typescript", "vite"]
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Backend Expert",
+  "description": "Professional backend engineer: Python/FastAPI, Node, APIs, databases, auth.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["backend", "api", "python", "node", "database"]
+}

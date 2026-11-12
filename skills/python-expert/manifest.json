@@ -1,0 +1,8 @@
+{
+  "name": "Python Expert",
+  "description": "Professional Python developer: clean, idiomatic, tested code.",
+  "version": "1.0.0",
+  "entry_point": "SKILL.md",
+  "builtin": true,
+  "tags": ["python", "clean-code", "testing"]
+}
