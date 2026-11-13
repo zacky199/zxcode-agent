@@ -269,18 +269,35 @@ python -m compileall -q .
 
 ### Project layout
 
+```text
+.
+├── main.py                 CLI entry point
+├── config/                 Configuration, settings, and constants
+├── core/                   Agent loop, lifecycle, roles, and sub-agents
+├── planner/                Planning, task graph, scheduling, and repair
+├── execution/              Checkpoints, recovery, journal, sandbox, rollback
+├── tools/                  Built-in tools, command risk, and mutation policy
+├── providers/              LLM provider adapters and multi-AI routing
+├── mcp/                    MCP client, manager, and registry
+├── plugins/                Plugin SDK, loader, installer, and registry
+├── memory/                 Conversation, project, and semantic memory
+├── indexing/               Repository graph, symbols, and semantic indexing
+├── storage/                SQLite, cache, and vector storage
+├── sandbox/                Container image definitions
+├── skills/                 Built-in and installable agent skills
+├── ui/                     Terminal interface
+├── utils/                  Shared utilities and validation
+├── tests/                  Automated unit, integration, and reliability tests
+├── specs/                  Versioned feature specifications and task plans
+├── docs/                   Active documentation, release records, and archives
+├── .github/workflows/      CI and release automation
+├── CHANGELOG.md            Version history
+├── TECHNICAL_DEBT.md       Open engineering risks and follow-up work
+├── requirements.txt        Python dependencies
+└── pytest.ini              Pytest configuration
 ```
-main.py               CLI entry point (commands, wizards, main loop)
-core/agent.py         Hardened ReAct agent loop (retry/compaction/rollback)
-core/subagent.py      Parallel sub-agent delegation
-providers/            Provider adapters + multi-AI router
-tools/engine.py       10 native tools + markdown-protocol fallback
-plugins/              Skill manager + Python plugin SDK
-planner/              Task planning, reflection, repair
-memory/  indexing/    Context assembly (metadata, semantic store, symbols)
-execution/            Diff engine, checkpoint, rollback, authorized shell runner
-ui/console.py         Aurora terminal UI (themes, live activity panel)
-```
+
+See [`docs/README.md`](docs/README.md) for the documentation index and archive policy.
 
 ## 🗺️ Roadmap
 
