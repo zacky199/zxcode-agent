@@ -48,6 +48,7 @@ from execution.test_runner import TesterRunner
 from utils.filesystem import FileSystemUtils
 from utils.sensitive_files import is_sensitive_path
 from core.subagent import SubAgentManager
+from core.mcp_integration import augment_system_prompt
 from core.roles import RoleOrchestrator
 from utils import setup_logger
 from utils.text import truncate_middle
@@ -1026,6 +1027,9 @@ class ZXAgentPro:
         if tool_schemas is not None and not allow_delegation:
             tool_schemas = [schema for schema in tool_schemas
                             if schema.get("function", {}).get("name") != "delegate_tasks"]
+
+        if tool_schemas:
+            system_prompt = augment_system_prompt(system_prompt, tool_schemas)
 
         last_call_key: Optional[str] = None
         consecutive_repeats = 0
