@@ -48,7 +48,9 @@ from execution.test_runner import TesterRunner
 from utils.filesystem import FileSystemUtils
 from utils.sensitive_files import is_sensitive_path
 from core.subagent import SubAgentManager
-from core.mcp_integration import augment_system_prompt
+from core.mcp_integration import (
+    augment_system_prompt, filter_tool_schemas_for_task,
+)
 from core.roles import RoleOrchestrator
 from utils import setup_logger
 from utils.text import truncate_middle
@@ -1006,6 +1008,23 @@ class ZXAgentPro:
     # ------------------------------------------------------------------
     # The ReAct loop
     # ------------------------------------------------------------------
+    @staticmethod
+    def _extract_task_text(messages: List[Dict[str, Any]]) -> str:
+        """Collect recent user task text without including tool outputs in routing."""
+        chunks = []
+        for message in reversed(messages or []):
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content", "")
+            if isinstance(content, str):
+                chunks.append(content)
+            elif isinstance(content, list):
+                chunks.extend(item.get("text", "") for item in content
+                             if isinstance(item, dict) and isinstance(item.get("text"), str))
+            if len(chunks) >= 3:
+                break
+        return "\n".join(reversed(chunks))
+
     async def _react_loop(self, system_prompt: str, messages: List[Dict[str, Any]],
                           final_box: List[str], fatal: List[bool],
                           max_iterations: int = 15,
@@ -1029,7 +1048,11 @@ class ZXAgentPro:
                             if schema.get("function", {}).get("name") != "delegate_tasks"]
 
         if tool_schemas:
-            system_prompt = augment_system_prompt(system_prompt, tool_schemas)
+            tool_schemas = filter_tool_schemas_for_task(
+                self._extract_task_text(messages), tool_schemas
+            )
+            if tool_schemas:
+                system_prompt = augment_system_prompt(system_prompt, tool_schemas)
 
         last_call_key: Optional[str] = None
         consecutive_repeats = 0
