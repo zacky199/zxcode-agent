@@ -7,7 +7,7 @@ import pytest
 from zxcode_mcp import MCPManager, MCPSecurityError
 from zxcode_mcp.security import (
     MCPServerConfig, validate_arguments, validate_endpoint, validate_endpoint_resolution,
-    classify_mcp_tool_risk,
+    classify_mcp_tool_risk, MCPToolPolicy,
 )
 
 
@@ -719,3 +719,37 @@ def test_mcp_tool_schema_exposes_advisory_risk_but_still_requires_approval():
     description = manager.get_tool_schemas()[0]["function"]["description"]
     assert "LOCAL ADVISORY RISK: read_only" in description
     assert "Approval is still required" in description
+
+
+def test_mcp_policy_modes_and_explicit_deny():
+    risk_read = classify_mcp_tool_risk("lookup", "Search")
+    risk_write = classify_mcp_tool_risk("update", "Update record")
+    policy = MCPToolPolicy("approval")
+    assert policy.evaluate("lookup", risk_read)["allowed"]
+    assert policy.evaluate("update", risk_write)["allowed"]
+    readonly = MCPToolPolicy("read_only")
+    assert readonly.evaluate("lookup", risk_read)["allowed"]
+    assert not readonly.evaluate("update", risk_write)["allowed"]
+    assert not readonly.evaluate("mystery", {"level": "unknown"})["allowed"]
+    deny = MCPToolPolicy("deny")
+    assert not deny.evaluate("lookup", risk_read)["allowed"]
+    denied = MCPToolPolicy("approval", {"lookup"})
+    assert not denied.evaluate("lookup", risk_read)["allowed"]
+
+
+def test_mcp_manager_explicit_deny_blocks_before_approval_or_call():
+    approved = []
+    manager = _configured_manager(approval=lambda *args: approved.append(args) or True)
+    manager.policies["sample"] = MCPToolPolicy("approval", denied_tools={"lookup"})
+    asyncio.run(manager.refresh_server("sample"))
+    blocked = asyncio.run(manager.execute_tool("mcp__sample__lookup", {"query": "ok"}))
+    assert blocked["status"] == "error" and "blocked by local policy" in blocked["output"]
+    assert approved == []
+    assert manager.clients["sample"].called == []
+
+
+def test_mcp_policy_invalid_modes_fail_closed():
+    with pytest.raises(MCPSecurityError):
+        MCPToolPolicy("auto_allow")
+    with pytest.raises(MCPSecurityError):
+        MCPToolPolicy("approval", "lookup")

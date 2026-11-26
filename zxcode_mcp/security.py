@@ -46,6 +46,31 @@ def classify_mcp_tool_risk(tool_name: str, description: str = "") -> Dict[str, s
     return {"level": "unknown", "reason": "Intent cannot be reliably inferred; treat as potentially side-effecting."}
 
 
+class MCPToolPolicy:
+    """Local enforcement policy for discovered MCP tools. Defaults require approval."""
+    MODES = {"approval", "read_only", "deny"}
+
+
+    def __init__(self, mode: str = "approval", denied_tools=()):
+        if mode not in self.MODES:
+            raise MCPSecurityError("Unsupported MCP policy mode")
+        if isinstance(denied_tools, str) or not isinstance(denied_tools, (list, tuple, set, frozenset)):
+            raise MCPSecurityError("MCP denied tools must be an explicit collection")
+        if len(denied_tools) > 128 or any(not isinstance(t, str) or len(t) > 128 for t in denied_tools):
+            raise MCPSecurityError("MCP denied tool list invalid or too large")
+        self.mode = mode
+        self.denied_tools = frozenset(denied_tools)
+
+    def evaluate(self, tool_name: str, risk: Dict[str, str]) -> Dict[str, Any]:
+        if tool_name in self.denied_tools:
+            return {"allowed": False, "reason": "Tool explicitly denied by local policy."}
+        if self.mode == "deny":
+            return {"allowed": False, "reason": "MCP tools are disabled by local policy."}
+        if self.mode == "read_only" and risk.get("level") != "read_only":
+            return {"allowed": False, "reason": "Read-only policy blocks non-read-only or uncertain tools."}
+        return {"allowed": True, "reason": "Local policy permits proceeding to mandatory approval."}
+
+
 @dataclass(frozen=True)
 class MCPServerConfig:
     name: str

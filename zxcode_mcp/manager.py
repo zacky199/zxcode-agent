@@ -10,7 +10,7 @@ from .client import MCPClient, MCPProtocolError
 from .registry import MCPRegistry
 from .security import (
     MCPServerConfig, MCPSecurityError, encode_result,
-    validate_arguments, validate_tool_schema, classify_mcp_tool_risk,
+    validate_arguments, validate_tool_schema, classify_mcp_tool_risk, MCPToolPolicy,
 )
 
 
@@ -31,7 +31,8 @@ class MCPManager:
         self, name: str, url: str = None, *, transport: str = "streamable-http",
         command: str = None, args=(), cwd: str = None, sandbox_image: str = None, env=None, headers=None,
         header_env=None, header_vault=None, allowed_tools=(), timeout_seconds: float = 20.0,
-        max_response_bytes: int = 1_000_000,
+        max_response_bytes: int = 1_000_000, policy_mode: str = "approval",
+        denied_tools=(),
     ) -> None:
         if name in self.clients:
             raise MCPSecurityError(f"MCP server already registered: {name}")
@@ -56,6 +57,8 @@ class MCPManager:
             allowed_tools=frozenset(allowed_tools or ()),
             timeout_seconds=timeout_seconds, max_response_bytes=max_response_bytes,
         )
+        self.policies = getattr(self, "policies", {})
+        self.policies[name] = MCPToolPolicy(policy_mode, denied_tools)
         self.configs[name] = config
         self.clients[name] = MCPClient(config)
         logger.info("MCP server configured", extra={"fields": {"server": name, "transport": transport}})
@@ -65,6 +68,7 @@ class MCPManager:
             raise KeyError(f"Unknown MCP server: {name}")
         self.clients.pop(name, None)
         self.configs.pop(name, None)
+        getattr(self, "policies", {}).pop(name, None)
         self.registry.remove_server(name)
         self._tool_map = {key: value for key, value in self._tool_map.items()
                           if value[0] != name}
@@ -153,6 +157,12 @@ class MCPManager:
         server_name, remote_name = target
         config, client = self.configs[server_name], self.clients[server_name]
         item = self.registry.get_tool(public_name)
+        policy = getattr(self, "policies", {}).get(server_name, MCPToolPolicy())
+        risk = item.get("risk") or classify_mcp_tool_risk(remote_name, item.get("description", ""))
+        decision = policy.evaluate(remote_name, risk)
+        if not decision["allowed"]:
+            logger.warning("MCP tool blocked by local policy", extra={"fields": {"server": server_name, "tool": remote_name}})
+            return {"tool": public_name, "status": "error", "output": "MCP invocation blocked by local policy: " + decision["reason"]}
         if self.approval_callback is None:
             logger.warning("MCP tool denied: no approval policy", extra={"fields": {
                 "server": server_name, "tool": remote_name}})
@@ -167,7 +177,6 @@ class MCPManager:
                     "output": "MCP arguments failed schema or size validation."}
         try:
             import copy
-            risk = item.get("risk") or classify_mcp_tool_risk(remote_name, item.get("description", ""))
             try:
                 callback_params = inspect.signature(self.approval_callback).parameters
                 accepts_risk = (len(callback_params) >= 4 or any(

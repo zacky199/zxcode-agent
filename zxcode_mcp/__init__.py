@@ -2,10 +2,10 @@
 from .client import MCPClient, MCPProtocolError
 from .registry import MCPRegistry
 from .manager import MCPManager
-from .security import MCPServerConfig, MCPSecurityError
+from .security import MCPServerConfig, MCPSecurityError, MCPToolPolicy
 from .config_store import MCPConfigStore
 
 __all__ = [
     "MCPClient", "MCPProtocolError", "MCPRegistry", "MCPManager",
-    "MCPServerConfig", "MCPSecurityError", "MCPConfigStore",
+    "MCPServerConfig", "MCPSecurityError", "MCPToolPolicy", "MCPConfigStore",
 ]
