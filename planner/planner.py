@@ -6,6 +6,8 @@ from utils.validation import ValidationUtils
 
 class TaskPlanner:
     """Build and validate a dependency-aware TaskGraph from an LLM response."""
+    MAX_STEP_DESCRIPTION_CHARS = 2_000
+    MAX_PLAN_DESCRIPTION_CHARS = 10_000
 
     FALLBACK_WARNING = (
         "Warning: Planner response was invalid or not readable; continuing with the "
@@ -50,11 +52,16 @@ class TaskPlanner:
 
             graph = TaskGraph()
             raw_dependencies = []
+            total_description_chars = 0
             for idx, raw_step in enumerate(steps):
                 if not isinstance(raw_step, dict):
                     return self._fallback(user_prompt)
                 description = raw_step.get("description")
-                if not isinstance(description, str) or not description.strip():
+                if (not isinstance(description, str) or not description.strip()
+                        or len(description) > self.MAX_STEP_DESCRIPTION_CHARS):
+                    return self._fallback(user_prompt)
+                total_description_chars += len(description)
+                if total_description_chars > self.MAX_PLAN_DESCRIPTION_CHARS:
                     return self._fallback(user_prompt)
                 node_id = f"step_{idx + 1}"
                 verification_commands = raw_step.get("verification_commands", [])

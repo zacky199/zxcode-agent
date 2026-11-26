@@ -76,3 +76,34 @@ def test_planner_falls_back_on_cycle_instead_of_silently_dropping_edges():
     assert graph.fallback_used
     assert list(graph.nodes) == ["step_1"]
     assert graph.nodes["step_1"].description == "original goal"
+
+
+def test_planner_rejects_oversized_single_step_description():
+    import json
+    async def callback(system, prompt):
+        return json.dumps({"steps": [{"description": "x" * 2001, "depends_on": []}]})
+    graph = __import__("asyncio").run(TaskPlanner(callback).create_plan("original goal"))
+    assert graph.fallback_used
+    assert graph.nodes["step_1"].description == "original goal"
+
+
+def test_planner_rejects_plan_with_oversized_aggregate_descriptions():
+    import json
+    async def callback(system, prompt):
+        return json.dumps({"steps": [
+            {"description": "x" * 2000, "depends_on": []} for _ in range(6)
+        ]})
+    graph = __import__("asyncio").run(TaskPlanner(callback).create_plan("original goal"))
+    assert graph.fallback_used
+    assert graph.nodes["step_1"].description == "original goal"
+
+
+def test_planner_accepts_descriptions_at_the_character_limits():
+    import json
+    async def callback(system, prompt):
+        return json.dumps({"steps": [
+            {"description": "x" * 2000, "depends_on": []} for _ in range(5)
+        ]})
+    graph = __import__("asyncio").run(TaskPlanner(callback).create_plan("goal"))
+    assert not graph.fallback_used
+    assert len(graph.nodes) == 5
