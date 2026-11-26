@@ -66,7 +66,7 @@ def test_manager_audits_approved_invocation_without_arguments_or_result(tmp_path
 
 
 def test_audit_size_limit_blocks_append(tmp_path):
-    audit = MCPAuditLog(tmp_path / "audit.jsonl", max_bytes=550)
+    audit = MCPAuditLog(tmp_path / "audit.jsonl", max_bytes=550, max_archives=0)
     audit.append(event="small")
     with pytest.raises(OSError, match="size limit"):
         audit.append(event="oversized", server="s" * 64, tool="t" * 96)
@@ -108,3 +108,43 @@ def test_required_audit_unavailable_fails_closed_before_remote_call():
     outcome = asyncio.run(manager.execute_tool("mcp__demo__lookup", {}))
     assert outcome["status"] == "error" and "audit logging" in outcome["output"]
     assert manager.clients["demo"].called is False
+
+
+def test_audit_rotates_segments_and_preserves_cross_segment_chain(tmp_path):
+    audit = MCPAuditLog(tmp_path / "audit.jsonl", max_bytes=500, max_archives=8)
+    for i in range(6):
+        audit.append(event=f"event-{i}")
+    verified = audit.verify()
+    assert verified["valid"] and verified["entries"] == 6 and verified["segments"] >= 2
+    archives = audit.archive_paths()
+    assert archives and all(path.stat().st_mode & 0o777 == 0o600 for path in archives)
+    all_records = [json.loads(line) for path in archives + [audit.path] if path.exists() for line in path.read_text().splitlines()]
+    assert len(all_records) == 6
+    for left, right in zip(all_records, all_records[1:]):
+        assert right["previous_hash"] == left["hash"]
+
+
+def test_audit_detects_tampering_in_rotated_archive(tmp_path):
+    audit = MCPAuditLog(tmp_path / "audit.jsonl", max_bytes=500, max_archives=3)
+    for i in range(4):
+        audit.append(event=f"rotation-{i}")
+    archive = audit.archive_paths()[0]
+    archive.write_text(archive.read_text().replace('"event": "rotation-0"', '"event": "altered"'))
+    assert audit.verify()["valid"] is False
+    with pytest.raises(OSError, match="integrity failure"):
+        audit.append(event="blocked-after-archive-tamper")
+
+
+def test_audit_rotation_archive_limit_fails_closed_without_deleting(tmp_path):
+    audit = MCPAuditLog(tmp_path / "audit.jsonl", max_bytes=500, max_archives=1)
+    for i in range(10):
+        try:
+            audit.append(event=f"archive-limit-{i}")
+        except OSError as exc:
+            assert "archive limit" in str(exc)
+            break
+    else:
+        pytest.fail("expected archive limit to stop appends")
+    before = [p.name for p in audit.archive_paths()]
+    assert len(before) == 1
+    assert audit.verify()["valid"]
