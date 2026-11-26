@@ -173,3 +173,20 @@ def test_manager_reports_unknown_and_never_suggests_retry_if_post_call_audit_fai
     assert result["status"] == "unknown"
     assert "DO NOT retry automatically" in result["output"]
     assert client.called == 1
+
+
+def test_audit_serializes_concurrent_process_appends(tmp_path):
+    import multiprocessing
+    audit_path = str(tmp_path / "audit.jsonl")
+    def writer(path, prefix, count):
+        log = MCPAuditLog(path, max_bytes=100000, max_archives=0)
+        for index in range(count):
+            log.append(event=f"{prefix}-{index}")
+    processes = [multiprocessing.Process(target=writer, args=(audit_path, f"p{i}", 20)) for i in range(4)]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(15)
+        assert process.exitcode == 0
+    final = MCPAuditLog(audit_path).verify()
+    assert final["valid"] and final["entries"] == 80
