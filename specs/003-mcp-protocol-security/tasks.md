@@ -1,0 +1,26 @@
+# Tasks
+
+- [x] Official SDK transport adapter (stdio and Streamable HTTP).
+- [x] Rename internal `mcp` package to `zxcode_mcp`.
+- [x] Explicit server configuration and per-server tool allowlist.
+- [x] HTTPS/loopback policy and header validation.
+- [x] JSON Schema and argument validation; reject remote schema references.
+- [x] Approval callback required for every tool invocation.
+- [x] Response/input/time limits and untrusted metadata/result labeling.
+- [x] ToolEngine and ZXAgentPro integration.
+- [x] CI/release test installation includes the optional MCP extra.
+- [x] Real stdio and Streamable HTTP protocol tests.
+- [x] Full test suite, compileall, diff check, and wheel contents verified.
+- [x] Implement interactive approval UX in the CLI/TUI with fail-closed per-call confirmation.
+- [x] Add environment-variable-backed HTTP header credentials; persist references only, never secret values.
+- [ ] Integrate a dedicated OS credential vault.
+- [x] Harden stdio executable/cwd validation, argument bounds, and process environment injection checks.
+- [x] Ensure stdio child processes receive only the SDK's documented baseline environment plus explicit overrides; sanitize transport exception text.
+- [x] Add DNS preflight to reject private/non-global DNS answers before SDK connection.
+- [x] Pin HTTP TCP connections to the exact DNS-preflight address set; preserve original hostname for TLS SNI/verification and disable environment proxies.
+- [ ] Provide operator-specific host/network egress policy templates; OS/network controls remain defense in depth.
+- [x] Add opt-in Docker isolation for stdio: digest-pinned preloaded image, no network, read-only root/workspace, dropped capabilities, no-new-privileges, seccomp/AppArmor defaults, CPU/RAM/PID/file-descriptor/shared-memory limits, bounded tmpfs, and explicit entrypoint override.
+- [x] Build a digest-pinned MCP runtime fixture with pinned SDK/dependencies and a repeatable image-build script.
+- [x] Exercise MCP initialize, discovery, invocation, and in-container isolation probes through the production Docker stdio client path.
+- [ ] Add fine-grained writable mounts and a cross-platform OS sandbox backend; current Docker workspace mount is read-only and Linux-host dependent.
+- [ ] Evaluate SDK v2 migration when the project's Python baseline is ready.

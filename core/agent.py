@@ -165,7 +165,8 @@ class ZXAgentPro:
                  config: Optional[AgentConfig] = None,
                  plugin_approval_callback: Callable[[str], bool] = None,
                  allow_file_edits: bool = False,
-                 session_store: Optional[SessionStore] = None):
+                 session_store: Optional[SessionStore] = None,
+                 mcp_manager=None):
         self.provider = provider
         self.session_store = session_store
         self.workspace = workspace
@@ -186,7 +187,7 @@ class ZXAgentPro:
             allow_file_mutations=allow_file_edits, sandbox_mode=self.config.sandbox_mode,
             allow_host_execution=self.config.allow_host_execution,
             sandbox_runtime=self.config.sandbox_runtime, sandbox_image=self.config.sandbox_image,
-            sandbox_network=self.config.sandbox_network)
+            sandbox_network=self.config.sandbox_network, mcp_manager=mcp_manager)
         self.checkpoints = CheckpointManager(workspace)
         self.task_state = TaskStateStore(workspace)
         self.rollback = RollbackManager(

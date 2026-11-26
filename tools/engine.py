@@ -47,7 +47,7 @@ class ToolEngine:
                  allow_file_mutations: bool = NATIVE_FILE_MUTATIONS_DEFAULT,
                  sandbox_mode: str = "container", allow_host_execution: bool = False,
                  sandbox_runtime: str = None, sandbox_image: str = "zxcode-sandbox:latest",
-                 sandbox_network: str = "none"):
+                 sandbox_network: str = "none", mcp_manager=None):
         self.workspace = workspace
         self.diff_engine = DiffEngine(workspace)
         self.builtin = BuiltinTools(workspace, command_authorizer=confirm_callback,
@@ -60,6 +60,7 @@ class ToolEngine:
         self._registry: Dict[str, Callable[..., str]] = self._register_primitives()
         self._plugin_tools: Dict[str, Callable[[Dict[str, Any]], str]] = {}
         self._plugin_schemas: List[Dict[str, Any]] = []
+        self.mcp_manager = mcp_manager
 
     # ------------------------------------------------------------------
     # Tool schema registration
@@ -102,7 +103,13 @@ class ToolEngine:
         if not self.file_mutations_enabled:
             schemas = [s for s in schemas
                        if s.get("function", {}).get("name") not in FILE_MUTATION_TOOLS]
+        if self.mcp_manager is not None:
+            schemas.extend(self.mcp_manager.get_tool_schemas())
         return schemas
+
+    def set_mcp_manager(self, manager) -> None:
+        """Attach an explicitly configured MCP manager to this tool engine."""
+        self.mcp_manager = manager
 
     def _all_tool_schemas(self) -> List[Dict[str, Any]]:
         return [
@@ -374,6 +381,9 @@ class ToolEngine:
                     "output": FILE_MUTATION_DISABLED_MESSAGE}
         args = args or {}
         handler = self._registry.get(name)
+        if handler is None and name.startswith("mcp__") and self.mcp_manager is not None:
+            # Remote effects cannot be rolled back by the local mutation journal.
+            return await self.mcp_manager.execute_tool(name, args)
         if handler is None and name in self._plugin_tools:
             # Plugins remain process-privileged and are outside file-tool journaling.
             try:

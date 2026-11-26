@@ -77,11 +77,22 @@ ZX Code (`zx`) runs a checkpointed ReAct loop behind a distinctive **Aurora** te
 ## 📦 Install
 
 ```bash
-pip install -r requirements.txt
-python main.py --version
+# Install the application (Python 3.10+)
+python -m pip install .
+
+# Run the installed command
+zxcode --version
+zxcode --dir /path/to/project
 ```
 
-Requires Python 3.10+.
+For development and tests:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m pytest -q
+```
+
+`requirements.txt` remains available as a compatibility installation path during the packaging transition.
 
 ## 🐳 Sandbox image
 
@@ -260,7 +271,7 @@ Logs are written (JSON structured) to `~/.zxagent/logs/zx_agent.log`.
 python -m pytest
 
 # Lint check
-python -m pyflakes main.py config core execution indexing mcp memory \
+python -m pyflakes main.py config core execution indexing zxcode_mcp memory \
     planner plugins providers storage tools ui utils
 
 # Compile check
@@ -278,7 +289,7 @@ python -m compileall -q .
 ├── execution/              Checkpoints, recovery, journal, sandbox, rollback
 ├── tools/                  Built-in tools, command risk, and mutation policy
 ├── providers/              LLM provider adapters and multi-AI routing
-├── mcp/                    MCP client, manager, and registry
+├── zxcode_mcp/             MCP SDK adapter, manager, security, and registry
 ├── plugins/                Plugin SDK, loader, installer, and registry
 ├── memory/                 Conversation, project, and semantic memory
 ├── indexing/               Repository graph, symbols, and semantic indexing
@@ -293,8 +304,8 @@ python -m compileall -q .
 ├── .github/workflows/      CI and release automation
 ├── CHANGELOG.md            Version history
 ├── TECHNICAL_DEBT.md       Open engineering risks and follow-up work
-├── requirements.txt        Python dependencies
-└── pytest.ini              Pytest configuration
+├── pyproject.toml          Package metadata, dependencies, CLI, and pytest config
+└── requirements.txt        Compatibility dependency list
 ```
 
 See [`docs/README.md`](docs/README.md) for the documentation index and archive policy.
@@ -369,3 +380,38 @@ Released under the [MIT License](LICENSE).
 **ZX Code** — plan, edit, run, verify. All from your terminal.
 
 </div>
+
+### MCP integration (optional)
+
+ZX Code supports MCP through the official Python SDK. Install it explicitly with
+`pip install 'zxcode-agent[mcp]'`. The MCP adapter lives in `zxcode_mcp` so it
+does not shadow the upstream SDK's `mcp` namespace.
+
+MCP servers are not trusted automatically: configure an explicit tool allowlist
+and inject an approval callback before attaching `MCPManager` to `ZXAgentPro`.
+Remote HTTP endpoints require HTTPS (HTTP is limited to loopback) and receive a
+DNS validation with connection-bound IP pinning; private/non-global answers
+are rejected and TCP connects use only the validated addresses. Redirects are
+not followed, retries are disabled, and connection concurrency is capped. Host
+firewall egress filtering is not managed by ZX Code and remains recommended as
+separate defense in depth. Tool
+schemas and arguments are validated, and every tool call requires a separate
+interactive confirmation in the CLI. stdio child processes receive the
+SDK's small baseline environment allowlist plus explicitly configured values;
+they do not inherit ZX Code's full environment. For stronger isolation, stdio
+servers can opt into Docker with a digest-pinned image; the container has no
+network, a read-only root/workspace, dropped capabilities, and bounded CPU,
+RAM, process count, file descriptors, and shared memory. Direct stdio mode is
+not an OS sandbox.
+Use `/mcp help` to configure HTTP/stdio servers, refresh discovery, inspect tools,
+and remove a server. Auth headers can reference environment variables with
+`--header Authorization=MY_MCP_TOKEN` or OS vault entries with
+`--vault Authorization=prod-token`. Manage OS vault entries using `/mcp vault-set
+NAME` and `/mcp vault-delete NAME`; secret values are never persisted to the
+private `~/.zxagent/mcp_servers.json`. Unsupported vault backends fail closed.
+Remote side effects are external to the local mutation journal and cannot be
+rolled back by it. For the pinned MCP runtime image fixture and real Docker
+protocol/isolation test, see
+[`docs/architecture/MCP_RUNTIME_IMAGE_BUILDER.md`](docs/architecture/MCP_RUNTIME_IMAGE_BUILDER.md).
+See also
+[`docs/architecture/MCP_PROTOCOL_SECURITY.md`](docs/architecture/MCP_PROTOCOL_SECURITY.md).

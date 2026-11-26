@@ -195,6 +195,7 @@ class ConsoleUI:
 [white]/setup[/white]    - Reconfigure API
 [white]/confirm[/white]  - Disable legacy auto-approval; prompts remain required
 [white]/edits[/white]    - Turn native file edits on/off
+[white]/mcp[/white]      - Configure and approve MCP servers/tools
 [white]/resume[/white]   - Reload the saved conversation for this folder
 [white]/new[/white]      - Start a fresh conversation
 [white]/clear[/white]    - Clear screen"""
@@ -451,6 +452,7 @@ class ConsoleUI:
             ("/theme [name]", "Change UI theme"),
             ("/setup", "Reconfigure provider / API key / model"),
             ("/edits [on|off]", "Enable/disable native file edits for this session"),
+            ("/mcp [help]", "Configure MCP servers, discover allowlisted tools, and approve each call"),
             ("/resume", "Reload the saved conversation for this folder"),
             ("/tasks", "List persisted task checkpoints and recovery state"),
             ("/task-status <task-id>", "Inspect checkpoint, node acceptance, and recovery evidence"),

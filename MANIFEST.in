@@ -1,0 +1,27 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include requirements.txt
+recursive-include config *.py
+recursive-include core *.py
+recursive-include execution *.py
+recursive-include indexing *.py
+recursive-include memory *.py
+recursive-include planner *.py
+recursive-include plugins *.py
+recursive-include providers *.py
+recursive-include storage *.py
+recursive-include tools *.py
+recursive-include ui *.py
+recursive-include utils *.py
+recursive-include zxcode_mcp *.py
+recursive-include skills *.md *.json
+prune tests
+prune docs
+prune specs
+prune build
+prune dist
+prune .venv
+prune __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store

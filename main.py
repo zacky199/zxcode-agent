@@ -14,6 +14,8 @@ import asyncio
 import argparse
 import logging
 import json
+import os
+import shlex
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from rich.prompt import Prompt, Confirm
@@ -32,6 +34,7 @@ from core import ZXAgentPro, AgentConfig
 from memory.session_store import SessionStore
 from tools.command_risk import assess_command
 from plugins import UniversalInstaller, PluginManager
+from zxcode_mcp import MCPManager, MCPConfigStore, MCPSecurityError
 
 log_file = DEFAULT_CONFIG_DIR / "logs" / "zx_agent.log"
 logger = setup_logger("zx_agent", log_file=log_file, level=logging.INFO)
@@ -109,6 +112,233 @@ def confirm_shell_command(ui: ConsoleUI, cmd: str) -> bool:
         ))
     except (EOFError, KeyboardInterrupt):
         return False
+
+
+def _redact_mcp_arguments(value, key=""):
+    sensitive = ("token", "secret", "password", "authorization", "credential",
+                 "api_key", "apikey", "cookie", "private_key")
+    normalized = key.lower().replace("-", "_")
+    if any(part in normalized for part in sensitive):
+        return "<REDACTED>"
+    if isinstance(value, dict):
+        return {str(k): _redact_mcp_arguments(v, str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_mcp_arguments(item) for item in value[:100]]
+    if isinstance(value, str):
+        return value[:1000]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return f"<{type(value).__name__}>"
+
+
+def confirm_mcp_tool(ui: ConsoleUI, server: str, tool: str, arguments: dict) -> bool:
+    """Fail-closed, per-invocation approval with bounded and redacted arguments."""
+    preview = json.dumps(_redact_mcp_arguments(arguments), ensure_ascii=False, indent=2)
+    if len(preview) > 5000:
+        preview = preview[:5000] + "\n... <preview truncated>"
+    ui.console.print(Panel(
+        f"[bold]Server:[/bold] {escape(server)}\n"
+        f"[bold]Remote tool:[/bold] {escape(tool)}\n\n"
+        "[bold yellow]External MCP tool call[/bold yellow]\n"
+        "The remote server may read, modify, transmit, or delete external data. "
+        "ZX Code cannot roll back remote side effects.\n\n"
+        f"[bold]Arguments (sensitive fields redacted):[/bold]\n{escape(preview)}",
+        title="MCP execution approval", border_style=ui.warn_color))
+    try:
+        return bool(Confirm.ask("Allow this remote MCP invocation?", default=False))
+    except (EOFError, KeyboardInterrupt):
+        return False
+
+
+async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw: str) -> None:
+    """Manage explicitly configured MCP servers and review every remote call."""
+    try:
+        parts = shlex.split(raw)
+    except ValueError as exc:
+        ui.print_warning(f"Invalid MCP command syntax: {exc}")
+        return
+    if not parts or parts[0] in {"help", "-h", "--help"}:
+        ui.console.print(Panel(
+            "[bold]/mcp servers[/bold]\n  List configured MCP servers\n\n"
+            "[bold]/mcp add-http NAME URL TOOL1,TOOL2 [--header Header=ENV_VAR] [--vault Header=SECRET_NAME][/bold]\n  Register HTTPS MCP server using env references or OS credential vault\n\n"
+            "[bold]/mcp add-stdio NAME ABSOLUTE_EXECUTABLE TOOL1,TOOL2 [--cwd DIR] -- ARG...[/bold]\n  Register a local stdio process (executes as your OS user)\n\n"
+            "[bold]/mcp vault-set SECRET_NAME[/bold]\n  Store a secret in OS vault using hidden input\n\n"
+            "[bold]/mcp vault-delete SECRET_NAME[/bold]\n  Delete a secret from OS vault after confirmation\n\n"
+            "[bold]/mcp remove NAME[/bold]\n  Remove a server after confirmation\n\n"
+            "[bold]/mcp refresh [NAME][/bold]\n  Connect and discover allowlisted tools\n\n"
+            "[bold]/mcp tools[/bold]\n  List currently discovered tools\n\n"
+            "Servers are not contacted automatically. Each remote tool call requires a separate approval.\n"
+            "Without --docker-image, stdio executes directly with your OS-user permissions.\n"
+            "Secrets can be stored using the OS credential vault; unsupported or insecure backends fail closed.",
+            title="MCP management", border_style=ui.theme_color))
+        return
+
+    action = parts[0].lower()
+    try:
+        if action == "servers" and len(parts) == 1:
+            table = Table(title="Configured MCP servers", border_style=ui.theme_color)
+            for heading in ("Name", "Transport", "Endpoint / Command", "Allowed tools", "Discovered"):
+                table.add_column(heading)
+            counts = manager.get_server_tool_counts()
+            for name, config in sorted(manager.configs.items()):
+                target = config.url if config.transport == "streamable-http" else config.command
+                table.add_row(name, config.transport, target or "-",
+                              ", ".join(sorted(config.allowed_tools)) or "<none>",
+                              str(counts.get(name, 0)))
+            if not manager.configs:
+                ui.console.print("[dim]No MCP servers configured.[/dim]")
+            else:
+                ui.console.print(table)
+            return
+
+        if action == "tools" and len(parts) == 1:
+            names = manager.get_available_tools()
+            if not names:
+                ui.console.print("[dim]No MCP tools discovered. Run /mcp refresh.[/dim]")
+            else:
+                for name in names:
+                    item = manager.registry.get_tool(name)
+                    ui.console.print(f"[bold]{escape(name)}[/bold]  [dim]{escape(item.get('description', ''))}[/dim]")
+            return
+
+        if action == "vault-set" and len(parts) == 2:
+            from zxcode_mcp.credentials import set_secret
+            secret_name = parts[1]
+            secret_value = Prompt.ask("Secret value", password=True, confirmation=False)
+            set_secret(secret_name, secret_value)
+            ui.print_success(f"Secret '{secret_name}' stored in OS credential vault.")
+            return
+
+        if action == "vault-delete" and len(parts) == 2:
+            from zxcode_mcp.credentials import delete_secret
+            secret_name = parts[1]
+            if Confirm.ask(f"Delete vault secret '{secret_name}'?", default=False):
+                delete_secret(secret_name)
+                ui.print_success(f"Vault secret '{secret_name}' deleted.")
+            return
+
+        if action == "add-http" and len(parts) >= 4:
+            name, url = parts[1], parts[2]
+            allowed = [item for item in parts[3].split(",") if item]
+            header_env = {}
+            header_vault = {}
+            options = parts[4:]
+            while options:
+                if len(options) < 2 or options[0] not in {"--header", "--vault"}:
+                    raise MCPSecurityError("Use repeatable --header Header=ENV_VAR or --vault Header=SECRET_NAME")
+                pair = options[1]
+                if "=" not in pair:
+                    raise MCPSecurityError("Header reference must be Header-Name=ENV_VAR")
+                header_name, env_name = pair.split("=", 1)
+                target_map = header_env if options[0] == "--header" else header_vault
+                if header_name in header_env or header_name in header_vault:
+                    raise MCPSecurityError("Duplicate HTTP header reference")
+                target_map[header_name] = env_name
+                options = options[2:]
+            if not allowed:
+                raise MCPSecurityError("Provide at least one explicitly allowed tool name")
+            ui.console.print(Panel(
+                f"Server: {escape(name)}\nEndpoint: {escape(url)}\n"
+                f"Allowed tools: {escape(', '.join(allowed))}\n"
+                f"Environment references: {escape(', '.join(header_env.values()) or 'none')}\n"
+                f"Vault references: {escape(', '.join(header_vault.values()) or 'none')}\n\n"
+                "Only connect to an MCP server you trust. Its tool metadata and results are untrusted, "
+                "and its remote actions cannot be rolled back by ZX Code.",
+                title="Register remote MCP server", border_style=ui.warn_color))
+            if not Confirm.ask("Trust and save this remote MCP server?", default=False):
+                ui.console.print("[dim]No changes made.[/dim]")
+                return
+            manager.add_server(name, url, transport="streamable-http",
+                               header_env=header_env, header_vault=header_vault, allowed_tools=allowed)
+            store.save(manager.configs)
+            ui.print_success(f"MCP HTTP server '{name}' saved. It has not been contacted yet.")
+            return
+
+        if action == "add-stdio" and len(parts) >= 4:
+            name, executable = parts[1], parts[2]
+            allowed = [item for item in parts[3].split(",") if item]
+            tail = parts[4:]
+            cwd = None
+            sandbox_image = None
+            if "--" in tail:
+                split_at = tail.index("--")
+                options, process_args = tail[:split_at], tail[split_at + 1:]
+            else:
+                options, process_args = tail, []
+            index = 0
+            while index < len(options):
+                option = options[index]
+                if index + 1 >= len(options):
+                    raise MCPSecurityError("Missing value for stdio option")
+                value = options[index + 1]
+                if option == "--cwd" and cwd is None:
+                    cwd = str(Path(value).expanduser().resolve(strict=True))
+                    if not Path(cwd).is_dir():
+                        raise MCPSecurityError("stdio working directory must be a directory")
+                elif option == "--docker-image" and sandbox_image is None:
+                    sandbox_image = value
+                else:
+                    raise MCPSecurityError("Use --cwd DIR and/or --docker-image IMAGE@sha256:DIGEST before -- ARGUMENTS")
+                index += 2
+            if sandbox_image:
+                if not cwd:
+                    raise MCPSecurityError("Docker-isolated stdio requires --cwd DIR (mounted read-only)")
+                if not executable.startswith("/"):
+                    raise MCPSecurityError("Container executable must be an absolute path inside the image")
+                executable_path = Path(executable)
+            else:
+                executable_path = Path(executable).expanduser()
+                if not executable_path.is_absolute() or not executable_path.is_file() or not os.access(executable_path, os.X_OK):
+                    raise MCPSecurityError("stdio executable must be an existing absolute executable path")
+            if not allowed:
+                raise MCPSecurityError("Provide at least one explicitly allowed tool name")
+            ui.console.print(Panel(
+                f"Executable: {escape(str(executable_path))}\n"
+                f"Arguments: {escape(json.dumps(process_args, ensure_ascii=False))}\n"
+                f"Working directory: {escape(cwd or str(Path.cwd()))}\n"
+                f"Docker image: {escape(sandbox_image or 'not enabled')}\n\n"
+                + ("Docker mode: no network, read-only root/workspace, dropped capabilities, "
+                   "no-new-privileges, 256 MiB RAM, 1 CPU, 64 processes. "
+                   "Only the selected workspace is mounted read-only. Image must already be present."
+                   if sandbox_image else
+                   "Direct mode: process runs with your OS-user permissions. Only register software you trust."),
+                title="Register local MCP process", border_style=ui.warn_color))
+            if not Confirm.ask("Trust and save this stdio server configuration?", default=False):
+                ui.console.print("[dim]No changes made.[/dim]")
+                return
+            manager.add_server(name, transport="stdio", command=str(executable_path),
+                               args=process_args, cwd=cwd, sandbox_image=sandbox_image,
+                               allowed_tools=allowed)
+            store.save(manager.configs)
+            ui.print_success(f"MCP stdio server '{name}' saved. It has not been launched yet.")
+            return
+
+        if action == "remove" and len(parts) == 2:
+            name = parts[1]
+            if name not in manager.configs:
+                raise MCPSecurityError(f"Unknown MCP server: {name}")
+            if Confirm.ask(f"Remove MCP server '{name}' and its discovered tools?", default=False):
+                manager.remove_server(name)
+                store.save(manager.configs)
+                ui.print_success(f"MCP server '{name}' removed.")
+            return
+
+        if action == "refresh" and len(parts) in {1, 2}:
+            names = [parts[1]] if len(parts) == 2 else sorted(manager.configs)
+            if not names:
+                ui.print_warning("No MCP servers configured. Use /mcp add-http or /mcp add-stdio.")
+                return
+            for name in names:
+                try:
+                    discovered = await manager.refresh_server(name)
+                    ui.print_success(f"{name}: discovered {len(discovered)} allowlisted tool(s)")
+                except Exception as exc:
+                    ui.print_error(f"{name}: discovery failed ({type(exc).__name__}); details are in local logs.")
+            return
+
+        ui.print_warning("Invalid MCP command. Run /mcp help.")
+    except (MCPSecurityError, KeyError, OSError, ValueError, RuntimeError) as exc:
+        ui.print_error(f"MCP: {exc}")
 
 
 def cmd_disable_legacy_auto_confirm(ui: ConsoleUI, settings_mgr: SettingsManager,
@@ -497,6 +727,30 @@ async def main():
         sandbox_image=args.sandbox_image, sandbox_network=args.sandbox_network)
     if args.max_iters:
         agent_config.max_iterations = max(1, min(args.max_iters, 200))
+    mcp_store = MCPConfigStore(DEFAULT_CONFIG_DIR / "mcp_servers.json")
+    mcp_manager = MCPManager(
+        approval_callback=lambda server, tool, arguments: confirm_mcp_tool(ui, server, tool, arguments)
+    )
+    try:
+        saved_mcp_servers = mcp_store.load()
+    except Exception as exc:
+        saved_mcp_servers = {}
+        ui.print_error(f"Could not load MCP configuration; MCP remains unconfigured: {type(exc).__name__}")
+    for server_name, server_config in saved_mcp_servers.items():
+        try:
+            mcp_manager.add_server(
+                server_name, server_config.get("url"),
+                transport=server_config["transport"],
+                command=server_config.get("command"), args=server_config.get("args", []),
+                cwd=server_config.get("cwd"), header_env=server_config.get("header_env", {}),
+                header_vault=server_config.get("header_vault", {}),
+                allowed_tools=server_config.get("allowed_tools", []),
+                timeout_seconds=server_config.get("timeout_seconds", 20.0),
+                max_response_bytes=server_config.get("max_response_bytes", 1_000_000),
+            )
+        except Exception as exc:
+            ui.print_warning(f"MCP server '{server_name}' not loaded ({type(exc).__name__}); check its config and environment.")
+
     agent = ZXAgentPro(
         provider=provider,
         workspace=workspace,
@@ -506,6 +760,7 @@ async def main():
         plugin_approval_callback=lambda preview: confirm_plugin_activation(ui, preview),
         config=agent_config,
         session_store=SessionStore(),
+        mcp_manager=mcp_manager,
     )
     # Native file edits are opt-in per session; --allow-edits still asks once.
     if args.allow_edits:
@@ -643,6 +898,9 @@ async def main():
             elif cmd == "/confirm":
                 cmd_disable_legacy_auto_confirm(ui, settings_mgr, cfg)
 
+            elif cmd == "/mcp" or cmd.startswith("/mcp "):
+                await cmd_mcp(ui, mcp_manager, mcp_store, user_input[len("/mcp"):].strip())
+
             elif cmd == "/edits" or cmd.startswith("/edits "):
                 cmd_edits(ui, agent, cmd[len("/edits"):])
 
@@ -704,10 +962,15 @@ async def main():
             logger.error(f"Runtime error: {e}", exc_info=True)
 
 
-if __name__ == "__main__":
+def cli() -> None:
+    """Synchronous console-script entry point for installed environments."""
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    cli()
