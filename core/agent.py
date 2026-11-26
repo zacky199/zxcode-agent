@@ -1056,6 +1056,7 @@ class ZXAgentPro:
 
         last_call_key: Optional[str] = None
         consecutive_repeats = 0
+        consecutive_tool_failures = 0
         successful_task_mutation = False
         verification_pending = False
         repair_pass_used = False
@@ -1179,6 +1180,14 @@ class ZXAgentPro:
                     precomputed[idx] = outcome
 
             for idx, tc in enumerate(tool_calls):
+                if consecutive_tool_failures >= self.config.max_consecutive_failures:
+                    yield {"type": "status", "content": (
+                        f"Stopping after repeated tool failures: {consecutive_tool_failures} consecutive errors "
+                        "without a successful tool outcome."
+                    )}
+                    fatal[0] = True
+                    final_box.append("".join(text_parts))
+                    return
                 name = tc.get("name", "")
                 args = tc.get("arguments", {}) or {}
                 try:
@@ -1264,6 +1273,10 @@ class ZXAgentPro:
                     else:
                         result = await self.tool_engine.execute_tool(name, args, journal=journal)
                 status = result.get("status", "ok")
+                if status == "ok":
+                    consecutive_tool_failures = 0
+                else:
+                    consecutive_tool_failures += 1
                 output = result.get("output") or ""
                 log.info("tool executed",
                          extra={"fields": {"tool": name, "status": status,

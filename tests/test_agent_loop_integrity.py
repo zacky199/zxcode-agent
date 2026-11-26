@@ -387,3 +387,40 @@ async def test_chat_stream_holds_workspace_lock_until_stream_closes(tmp_path, mo
     await first.aclose()
     third_events = [event async for event in agent.chat_stream("third")]
     assert third_events[0]["content"] == "third"
+
+
+@pytest.mark.asyncio
+async def test_loop_stops_on_alternating_consecutive_tool_failures(tmp_path):
+    class AlternatingFailureProvider(RoutedProvider):
+        def __init__(self):
+            super().__init__("alternating-failures")
+            self.calls = 0
+
+
+        async def stream_complete_async(self, system, messages, tools=None):
+            self.calls += 1
+            tool_names = ["write_file", "edit_file", "write_file", "edit_file"]
+            name = tool_names[min(self.calls - 1, len(tool_names) - 1)]
+            arguments = ({"file_path": "fail.txt", "content": "x"}
+                       if name == "write_file" else
+                       {"file_path": "fail.txt", "search": "not-found", "replace": "x"})
+            yield {"type": "tool_call", "content": {
+                "id": f"fail-{self.calls}", "name": name, "arguments": arguments
+            }}
+            yield {"type": "done", "content": ""}
+
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    provider = AlternatingFailureProvider()
+    agent = ZXAgentPro(provider, workspace, config=AgentConfig(
+        max_consecutive_failures=2, max_repeated_tool_calls=4,
+        max_iterations=12, store_tool_memory=False,
+    ))
+    events = [event async for event in agent.chat_stream("perform failing changes")]
+
+    statuses = [event["content"] for event in events if event["type"] == "status"]
+    failures = [event for event in events if event["type"] == "tool_result"
+                and event["content"].get("status") == "error"]
+    assert provider.calls <= 3
+    assert len(failures) == 2
+    assert any("repeated tool failures" in str(status).lower() for status in statuses)
