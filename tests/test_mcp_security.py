@@ -156,7 +156,8 @@ def test_docker_stdio_command_is_locked_down_and_uses_digest(tmp_path, monkeypat
                  "--memory=256m", "--memory-swap=256m", "--cpus=1.0", "--pull=never",
                  "--ulimit=nofile=1024:1024", "--ulimit=core=0:0", "--shm-size=16m"):
         assert flag in args
-    assert "--env" in args and "LANG" in args
+    assert "--env" in args and "LANG=C.UTF-8" in args
+    assert "LANG" not in args
     assert config.sandbox_image in args
     assert args[args.index("--entrypoint") + 1] == "/usr/bin/node"
     assert "/usr/bin/node" in args
