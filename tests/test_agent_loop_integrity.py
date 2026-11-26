@@ -258,6 +258,42 @@ async def test_node_scheduler_executes_dependency_nodes_separately(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_failed_acceptance_retries_node_once_with_repair_prompt(tmp_path):
+    class RepairProvider(RoutedProvider):
+        def __init__(self):
+            super().__init__("repair-provider")
+            self.node_prompts = []
+
+        async def complete_async(self, system, messages, tools=None):
+            self.complete_calls += 1
+            return Response('{"objective":"repair test","steps":[{"description":"complete task","depends_on":[]}]}' )
+
+        async def stream_complete_async(self, system, messages, tools=None):
+            self.stream_calls += 1
+            self.node_prompts.append(str(messages[-1].get("content", "")))
+            if self.stream_calls == 1:
+                yield {"type": "done", "content": ""}
+            else:
+                yield {"type": "text", "content": "Completed with verified response."}
+                yield {"type": "done", "content": ""}
+
+    workspace = tmp_path / "repair-node"
+    workspace.mkdir()
+    provider = RepairProvider()
+    agent = ZXAgentPro(provider, workspace, config=AgentConfig(store_tool_memory=False))
+    events = [event async for event in agent.chat_stream("finish a simple task") ]
+
+    assert provider.stream_calls == 2
+    assert any("BOUNDED REPAIR REQUEST 1/1" in prompt for prompt in provider.node_prompts)
+    assert any("bounded evidence-based repair/replan attempt (1/1)" in event.get("content", "")
+               for event in events if event["type"] == "status")
+    saved_graph = agent.task_state.load()["state"]["payload"]["task_graph"]
+    assert saved_graph["nodes"][0]["status"] == "completed"
+    assert saved_graph["nodes"][0]["retry_count"] == 1
+
+
+
+@pytest.mark.asyncio
 async def test_resume_skips_completed_nodes_and_runs_only_pending_nodes(tmp_path):
     class ResumeProvider(RoutedProvider):
         def __init__(self):
