@@ -148,3 +148,28 @@ def test_audit_rotation_archive_limit_fails_closed_without_deleting(tmp_path):
     before = [p.name for p in audit.archive_paths()]
     assert len(before) == 1
     assert audit.verify()["valid"]
+
+
+def test_manager_reports_unknown_and_never_suggests_retry_if_post_call_audit_fails(tmp_path):
+    from types import SimpleNamespace
+    class FailExecutionAudit:
+        def append(self, **event):
+            if event.get("event") == "execution":
+                raise OSError("disk full")
+    manager = MCPManager(approval_callback=lambda *_: True, audit_log=FailExecutionAudit(), audit_required=True)
+    manager.add_server("sample", "https://mcp.example.com/mcp", allowed_tools={"lookup"})
+    class StubClient:
+        called = 0
+        async def list_tools(self):
+            return [SimpleNamespace(name="lookup", description="read data", inputSchema={"type":"object", "properties": {"query":{"type":"string"}}, "required":["query"], "additionalProperties":False})]
+        async def call_tool(self, *args):
+            self.called += 1
+            return {"content":[{"type":"text", "text":"remote-success"}], "isError":False}
+    client = StubClient()
+    manager.clients["sample"] = client
+    import asyncio
+    asyncio.run(manager.refresh_server("sample"))
+    result = asyncio.run(manager.execute_tool("mcp__sample__lookup", {"query":"ok"}))
+    assert result["status"] == "unknown"
+    assert "DO NOT retry automatically" in result["output"]
+    assert client.called == 1

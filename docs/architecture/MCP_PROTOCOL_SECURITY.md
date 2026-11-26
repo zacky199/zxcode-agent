@@ -79,7 +79,11 @@ The interactive CLI exposes `/mcp` commands:
 - `/mcp remove NAME` — revoke a server and its discovered tools after confirmation.
 
 Each invocation presents the server, remote tool, and bounded argument preview;
-sensitive-looking argument keys are redacted. Approval defaults to **No**.
+sensitive-looking argument keys are redacted. Approval defaults to **No**. The
+`read_only` policy is a heuristic based on remote tool names/descriptions, not a
+proof of side-effect-free behavior; remote metadata is untrusted and can lie. Keep
+per-call approval enabled, and use explicit deny lists or `deny` mode when an
+operation must not run.
 Non-secret server configuration and environment-variable references are atomically
 persisted in the user's private `~/.zxagent/mcp_servers.json` file (directory
 mode 0700, file mode 0600). Secret values are resolved at runtime and never
