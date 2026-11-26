@@ -407,11 +407,17 @@ def test_mcp_config_store_round_trip_and_private_permissions(tmp_path):
                        args=("server.js",), cwd=str(tmp_path),
                        sandbox_image="registry.example/mcp@sha256:" + "c" * 64,
                        allowed_tools={"lookup"})
-    store.save(manager.configs)
+    from zxcode_mcp.security import MCPToolPolicy
+    manager.policies["httpdocs"] = MCPToolPolicy("read_only", {"write", "delete"})
+    store.save(manager.configs, manager.policies)
     assert store.path.stat().st_mode & 0o777 == 0o600
     assert store.path.parent.stat().st_mode & 0o777 == 0o700
     loaded = store.load()
     assert loaded["httpdocs"]["allowed_tools"] == ["read", "search"]
+    assert loaded["httpdocs"]["policy_mode"] == "read_only"
+    assert loaded["httpdocs"]["denied_tools"] == ["delete", "write"]
+    assert loaded["localdocs"]["policy_mode"] == "approval"
+    assert loaded["localdocs"]["denied_tools"] == []
     assert loaded["localdocs"]["args"] == ["server.py", "--stdio"]
     assert loaded["isolateddocs"]["sandbox_image"].endswith("c" * 64)
     assert "headers" not in store.path.read_text(encoding="utf-8")

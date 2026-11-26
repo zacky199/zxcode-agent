@@ -47,7 +47,8 @@ class MCPConfigStore:
             if not isinstance(item, dict):
                 raise MCPSecurityError(f"Invalid MCP configuration for server {name!r}")
             allowed = {"name", "transport", "url", "command", "args", "cwd", "sandbox_image",
-                       "header_env", "header_vault", "allowed_tools", "timeout_seconds", "max_response_bytes"}
+                       "header_env", "header_vault", "allowed_tools", "timeout_seconds", "max_response_bytes",
+                       "policy_mode", "denied_tools"}
             if set(item) - allowed or item.get("name") != name:
                 raise MCPSecurityError(f"Unexpected or inconsistent MCP configuration for {name!r}")
             args = item.get("args", [])
@@ -56,6 +57,14 @@ class MCPConfigStore:
                 raise MCPSecurityError(f"Invalid stdio arguments for server {name!r}")
             if not isinstance(allowed_tools, list) or any(not isinstance(tool, str) for tool in allowed_tools):
                 raise MCPSecurityError(f"Invalid tool allowlist for server {name!r}")
+            policy_mode = item.get("policy_mode", "approval")
+            denied_tools = item.get("denied_tools", [])
+            if not isinstance(policy_mode, str) or policy_mode not in {"approval", "read_only", "deny"}:
+                raise MCPSecurityError(f"Invalid MCP policy mode for {name!r}")
+            if not isinstance(denied_tools, list) or len(denied_tools) > 128 or any(
+                not isinstance(tool, str) or not tool or len(tool) > 128 for tool in denied_tools
+            ):
+                raise MCPSecurityError(f"Invalid MCP denied-tools list for {name!r}")
             header_env = item.get("header_env", {})
             if not isinstance(header_env, dict) or any(
                 not isinstance(k, str) or not isinstance(v, str) for k, v in header_env.items()
@@ -74,6 +83,8 @@ class MCPConfigStore:
                 max_response_bytes=item.get("max_response_bytes", 1_000_000),
             )
             validated[name] = self.serialize(config)
+            validated[name]["policy_mode"] = policy_mode
+            validated[name]["denied_tools"] = sorted(set(denied_tools))
         return validated
 
     @staticmethod
@@ -93,11 +104,15 @@ class MCPConfigStore:
             "max_response_bytes": config.max_response_bytes,
         }
 
-    def save(self, servers: Dict[str, MCPServerConfig]) -> None:
+    def save(self, servers: Dict[str, MCPServerConfig], policies=None) -> None:
+        policies = policies or {}
         self._secure_parent()
         payload = {
             "version": self.VERSION,
-            "servers": {name: self.serialize(config) for name, config in sorted(servers.items())},
+            "servers": {name: {**self.serialize(config),
+                            "policy_mode": getattr(policies.get(name), "mode", "approval"),
+                            "denied_tools": sorted(getattr(policies.get(name), "denied_tools", ())) }
+                       for name, config in sorted(servers.items())},
         }
         encoded = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
         fd, temp_name = tempfile.mkstemp(prefix=".mcp-config-", dir=str(self.path.parent))

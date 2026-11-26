@@ -160,7 +160,8 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
         return
     if not parts or parts[0] in {"help", "-h", "--help"}:
         ui.console.print(Panel(
-            "[bold]/mcp servers[/bold]\n  List configured MCP servers\n\n"
+            "[bold]/mcp servers[/bold]\n  List configured MCP servers including policy mode\n\n"
+            "[bold]/mcp policy NAME [approval|read_only|deny] [--deny TOOL1,TOOL2][/bold]\n  Show or update server policy and explicit tool denylist\n\n"
             "[bold]/mcp add-http NAME URL TOOL1,TOOL2 [--header Header=ENV_VAR] [--vault Header=SECRET_NAME][/bold]\n  Register HTTPS MCP server using env references or OS credential vault\n\n"
             "[bold]/mcp add-stdio NAME ABSOLUTE_EXECUTABLE TOOL1,TOOL2 [--cwd DIR] -- ARG...[/bold]\n  Register a local stdio process (executes as your OS user)\n\n"
             "[bold]/mcp vault-set SECRET_NAME[/bold]\n  Store a secret in OS vault using hidden input\n\n"
@@ -178,13 +179,14 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
     try:
         if action == "servers" and len(parts) == 1:
             table = Table(title="Configured MCP servers", border_style=ui.theme_color)
-            for heading in ("Name", "Transport", "Endpoint / Command", "Allowed tools", "Discovered"):
+            for heading in ("Name", "Transport", "Endpoint / Command", "Allowed tools", "Policy", "Discovered"):
                 table.add_column(heading)
             counts = manager.get_server_tool_counts()
             for name, config in sorted(manager.configs.items()):
                 target = config.url if config.transport == "streamable-http" else config.command
                 table.add_row(name, config.transport, target or "-",
                               ", ".join(sorted(config.allowed_tools)) or "<none>",
+                              manager.policies.get(name).mode if name in manager.policies else "approval",
                               str(counts.get(name, 0)))
             if not manager.configs:
                 ui.console.print("[dim]No MCP servers configured.[/dim]")
@@ -200,6 +202,32 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
                 for name in names:
                     item = manager.registry.get_tool(name)
                     ui.console.print(f"[bold]{escape(name)}[/bold]  [dim]{escape(item.get('description', ''))}[/dim]")
+            return
+
+        if action == "policy" and len(parts) in {2, 3, 5}:
+            name = parts[1]
+            if name not in manager.configs:
+                raise MCPSecurityError(f"Unknown MCP server: {name}")
+            current = manager.policies.get(name)
+            mode = current.mode if current else "approval"
+            denied = set(current.denied_tools if current else ())
+            if len(parts) == 2:
+                ui.console.print(f"{name}: mode={mode}; denied tools={', '.join(sorted(denied)) or '<none>'}")
+                return
+            new_mode = parts[2]
+            if new_mode not in {"approval", "read_only", "deny"}:
+                raise MCPSecurityError("Policy mode must be approval, read_only, or deny")
+            if len(parts) == 5 and parts[3] == "--deny":
+                denied = {tool for tool in parts[4].split(",") if tool}
+            elif len(parts) != 3:
+                raise MCPSecurityError("Syntax: /mcp policy NAME MODE [--deny TOOL1,TOOL2]")
+            from zxcode_mcp.security import MCPToolPolicy
+            if not Confirm.ask(f"Set policy for '{name}' to {new_mode}; deny={sorted(denied)}?", default=False):
+                ui.console.print("[dim]No changes made.[/dim]")
+                return
+            manager.policies[name] = MCPToolPolicy(new_mode, denied)
+            store.save(manager.configs, manager.policies)
+            ui.print_success(f"Policy for '{name}' saved: {new_mode}; denied {len(denied)} tool(s).")
             return
 
         if action == "vault-set" and len(parts) == 2:
@@ -251,7 +279,7 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
                 return
             manager.add_server(name, url, transport="streamable-http",
                                header_env=header_env, header_vault=header_vault, allowed_tools=allowed)
-            store.save(manager.configs)
+            store.save(manager.configs, manager.policies)
             ui.print_success(f"MCP HTTP server '{name}' saved. It has not been contacted yet.")
             return
 
@@ -310,7 +338,7 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
             manager.add_server(name, transport="stdio", command=str(executable_path),
                                args=process_args, cwd=cwd, sandbox_image=sandbox_image,
                                allowed_tools=allowed)
-            store.save(manager.configs)
+            store.save(manager.configs, manager.policies)
             ui.print_success(f"MCP stdio server '{name}' saved. It has not been launched yet.")
             return
 
@@ -320,7 +348,7 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
                 raise MCPSecurityError(f"Unknown MCP server: {name}")
             if Confirm.ask(f"Remove MCP server '{name}' and its discovered tools?", default=False):
                 manager.remove_server(name)
-                store.save(manager.configs)
+                store.save(manager.configs, manager.policies)
                 ui.print_success(f"MCP server '{name}' removed.")
             return
 
@@ -748,6 +776,8 @@ async def main():
                 allowed_tools=server_config.get("allowed_tools", []),
                 timeout_seconds=server_config.get("timeout_seconds", 20.0),
                 max_response_bytes=server_config.get("max_response_bytes", 1_000_000),
+                policy_mode=server_config.get("policy_mode", "approval"),
+                denied_tools=server_config.get("denied_tools", []),
             )
         except Exception as exc:
             ui.print_warning(f"MCP server '{server_name}' not loaded ({type(exc).__name__}); check its config and environment.")
