@@ -34,7 +34,7 @@ from core import ZXAgentPro, AgentConfig
 from memory.session_store import SessionStore
 from tools.command_risk import assess_command
 from plugins import UniversalInstaller, PluginManager
-from zxcode_mcp import MCPManager, MCPConfigStore, MCPSecurityError
+from zxcode_mcp import MCPManager, MCPConfigStore, MCPSecurityError, MCPAuditLog
 
 log_file = DEFAULT_CONFIG_DIR / "logs" / "zx_agent.log"
 logger = setup_logger("zx_agent", log_file=log_file, level=logging.INFO)
@@ -162,6 +162,7 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
         ui.console.print(Panel(
             "[bold]/mcp servers[/bold]\n  List configured MCP servers including policy mode\n\n"
             "[bold]/mcp policy NAME [approval|read_only|deny] [--deny TOOL1,TOOL2][/bold]\n  Show or update server policy and explicit tool denylist\n\n"
+            "[bold]/mcp audit [verify][/bold]\n  Verify hash-chain integrity of local MCP audit log\n\n"
             "[bold]/mcp add-http NAME URL TOOL1,TOOL2 [--header Header=ENV_VAR] [--vault Header=SECRET_NAME][/bold]\n  Register HTTPS MCP server using env references or OS credential vault\n\n"
             "[bold]/mcp add-stdio NAME ABSOLUTE_EXECUTABLE TOOL1,TOOL2 [--cwd DIR] -- ARG...[/bold]\n  Register a local stdio process (executes as your OS user)\n\n"
             "[bold]/mcp vault-set SECRET_NAME[/bold]\n  Store a secret in OS vault using hidden input\n\n"
@@ -192,6 +193,16 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
                 ui.console.print("[dim]No MCP servers configured.[/dim]")
             else:
                 ui.console.print(table)
+            return
+
+        if action == "audit" and len(parts) in {1, 2}:
+            if len(parts) == 2 and parts[1] != "verify":
+                raise MCPSecurityError("Syntax: /mcp audit [verify]")
+            result = manager.audit_log.verify() if manager.audit_log else {"valid": False, "entries": 0, "reason": "audit logging unavailable"}
+            if result.get("valid"):
+                ui.print_success(f"MCP audit chain valid: {result['entries']} entries")
+            else:
+                ui.print_error(f"MCP audit chain integrity failure: {result}")
             return
 
         if action == "tools" and len(parts) == 1:
@@ -225,6 +236,10 @@ async def cmd_mcp(ui: ConsoleUI, manager: MCPManager, store: MCPConfigStore, raw
             if not Confirm.ask(f"Set policy for '{name}' to {new_mode}; deny={sorted(denied)}?", default=False):
                 ui.console.print("[dim]No changes made.[/dim]")
                 return
+            if manager.audit_log is None:
+                raise MCPSecurityError("Required audit log unavailable; policy changes are disabled")
+            manager.audit_log.append(event="policy_change", server=name, policy=new_mode,
+                                   decision="allow", status="updated", tool="<policy>")
             manager.policies[name] = MCPToolPolicy(new_mode, denied)
             store.save(manager.configs, manager.policies)
             ui.print_success(f"Policy for '{name}' saved: {new_mode}; denied {len(denied)} tool(s).")
@@ -757,7 +772,13 @@ async def main():
     if args.max_iters:
         agent_config.max_iterations = max(1, min(args.max_iters, 200))
     mcp_store = MCPConfigStore(DEFAULT_CONFIG_DIR / "mcp_servers.json")
+    try:
+        mcp_audit = MCPAuditLog(DEFAULT_CONFIG_DIR / "mcp_audit.jsonl")
+    except Exception as exc:
+        mcp_audit = None
+        ui.print_error(f"MCP audit log unavailable; MCP invocations will fail closed: {type(exc).__name__}")
     mcp_manager = MCPManager(
+        audit_log=mcp_audit, audit_required=True,
         approval_callback=lambda server, tool, arguments, risk: confirm_mcp_tool(ui, server, tool, arguments, risk)
     )
     try:
