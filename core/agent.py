@@ -880,12 +880,41 @@ class ZXAgentPro:
                     yield {"type": "node_verification", "content": {
                         "node_id": node.id, "verification": verification_evidence}}
                 node.verification_evidence = verification_evidence
+                loop_fatal = node_fatal[0]
                 acceptance = NodeAcceptanceContract.evaluate(
-                    result=node_result, fatal=node_fatal[0], journal_closed=journal_closed,
+                    result=node_result, fatal=loop_fatal, journal_closed=journal_closed,
                     verification=verification_evidence)
                 if not acceptance.accepted:
                     node_fatal[0] = True
                 if node_fatal[0]:
+                    failure_evidence = (
+                        acceptance.evidence + "\nCoder output:\n" + node_result[:2500]
+                        + "\nVerification evidence:\n" + json.dumps(
+                            verification_evidence, ensure_ascii=False, default=str)[:3500
+                        ]
+                    )
+                    node.error_log = failure_evidence[:6000]
+                    retry_limit = min(max(0, int(node.max_retries)), 1)
+                    if not loop_fatal and node.retry_count < retry_limit:
+                        node.retry_count += 1
+                        node.description = self.repairer.build_repair_instruction(
+                            failure_evidence, attempt=node.retry_count,
+                            max_attempts=retry_limit, tool_name=f"DAG node {node.id}")
+                        node.status = "pending"
+                        node.result = ""
+                        node.acceptance = acceptance.to_dict()
+                        node.verification_evidence = verification_evidence
+                        yield {"type": "status", "content": (
+                            f"Node {node.id} failed acceptance; issuing one bounded evidence-based repair/replan "
+                            f"attempt ({node.retry_count}/{retry_limit}). Prior successful workspace edits are preserved."
+                        )}
+                        cursor.transition("planned", current_node_id=node.id, mutation_started=False)
+                        task_graph_data = self.planner.to_dict(task_graph)
+                        self._save_task_checkpoint(task_id, f"node_{node.id}_repair_pending", {
+                            "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
+                            "role_results": role_results, "test_results": [],
+                            "repair_attempt": node.retry_count}, cursor)
+                        continue
                     task_graph.update_status(node.id, "failed", result=node_result,
                                              error_log=acceptance.evidence,
                                              acceptance=acceptance.to_dict(),
@@ -896,7 +925,7 @@ class ZXAgentPro:
                     task_graph_data = self.planner.to_dict(task_graph)
                     self._save_task_checkpoint(task_id, "node_failed", {
                         "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
-                        "role_results": role_results, "test_results": [], "repair_attempt": 0}, cursor)
+                        "role_results": role_results, "test_results": [], "repair_attempt": node.retry_count}, cursor)
                     final_box.append(node_result)
                     break
                 task_graph.update_status(node.id, "completed", result=node_result,
