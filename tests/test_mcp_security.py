@@ -7,6 +7,7 @@ import pytest
 from zxcode_mcp import MCPManager, MCPSecurityError
 from zxcode_mcp.security import (
     MCPServerConfig, validate_arguments, validate_endpoint, validate_endpoint_resolution,
+    classify_mcp_tool_risk,
 )
 
 
@@ -688,3 +689,33 @@ def test_http_client_factory_disables_redirects_proxies_and_bounds_connections()
         assert client._transport._pool._max_keepalive_connections == 2
     finally:
         asyncio.run(client.aclose())
+
+
+def test_mcp_risk_classifier_labels_read_write_and_unknown_conservatively():
+    assert classify_mcp_tool_risk("lookup", "Search documents") ["level"] == "read_only"
+    assert classify_mcp_tool_risk("update_record", "Update profile") ["level"] == "mutating"
+    assert classify_mcp_tool_risk("delete_user", "Remove account") ["level"] == "high_risk"
+    assert classify_mcp_tool_risk("mystery", "") ["level"] == "unknown"
+    # Remote descriptions cannot make a tool safer; risk classification is conservative.
+    assert classify_mcp_tool_risk("fetch", "may execute scripts") ["level"] == "high_risk"
+
+
+def test_mcp_risk_label_passed_to_extended_approval_callback_and_legacy_supported():
+    risks = []
+    manager = _configured_manager(approval=lambda server, tool, args, risk: risks.append(risk) or True)
+    asyncio.run(manager.refresh_server("sample"))
+    result = asyncio.run(manager.execute_tool("mcp__sample__lookup", {"query": "safe"}))
+    assert result["status"] == "ok"
+    assert risks == [{"level": "read_only", "reason": "Appears to retrieve or inspect data; verify arguments and destination."}]
+    # Existing integrations with the original three-argument callback remain compatible.
+    manager2 = _configured_manager(approval=lambda server, tool, args: True)
+    asyncio.run(manager2.refresh_server("sample"))
+    assert asyncio.run(manager2.execute_tool("mcp__sample__lookup", {"query": "safe"}) )["status"] == "ok"
+
+
+def test_mcp_tool_schema_exposes_advisory_risk_but_still_requires_approval():
+    manager = _configured_manager(approval=lambda *_: True)
+    asyncio.run(manager.refresh_server("sample"))
+    description = manager.get_tool_schemas()[0]["function"]["description"]
+    assert "LOCAL ADVISORY RISK: read_only" in description
+    assert "Approval is still required" in description

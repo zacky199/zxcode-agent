@@ -28,6 +28,24 @@ class MCPSecurityError(ValueError):
     """Raised when an MCP operation violates local security policy."""
 
 
+
+_RISK_HIGH = re.compile(r"\b(delete|remove|drop|purge|destroy|revoke|transfer|withdraw|deploy|publish|execute|run|send|submit|purchase|pay|charge|overwrite|reset|shutdown|terminate)\b", re.I)
+_RISK_MUTATE = re.compile(r"\b(create|write|update|edit|modify|insert|append|upload|download|move|rename|save|set|post|patch|put|open)\b", re.I)
+_RISK_READ = re.compile(r"\b(read|list|search|find|lookup|get|fetch|query|inspect|view|show|browse|retrieve|select|status)\b", re.I)
+
+def classify_mcp_tool_risk(tool_name: str, description: str = "") -> Dict[str, str]:
+    """Conservative advisory risk label; remote metadata is untrusted and never grants approval."""
+    text = f"{tool_name} {description}"[:4000]
+    if _RISK_HIGH.search(text):
+        return {"level": "high_risk", "reason": "Potentially destructive, externally consequential, or execution-capable operation."}
+    if _RISK_MUTATE.search(text):
+        return {"level": "mutating", "reason": "May create or change external state."}
+    # Only call it read-only when an explicit read verb exists and no write verbs matched.
+    if _RISK_READ.search(text):
+        return {"level": "read_only", "reason": "Appears to retrieve or inspect data; verify arguments and destination."}
+    return {"level": "unknown", "reason": "Intent cannot be reliably inferred; treat as potentially side-effecting."}
+
+
 @dataclass(frozen=True)
 class MCPServerConfig:
     name: str

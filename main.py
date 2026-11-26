@@ -131,7 +131,7 @@ def _redact_mcp_arguments(value, key=""):
     return f"<{type(value).__name__}>"
 
 
-def confirm_mcp_tool(ui: ConsoleUI, server: str, tool: str, arguments: dict) -> bool:
+def confirm_mcp_tool(ui: ConsoleUI, server: str, tool: str, arguments: dict, risk: dict | None = None) -> bool:
     """Fail-closed, per-invocation approval with bounded and redacted arguments."""
     preview = json.dumps(_redact_mcp_arguments(arguments), ensure_ascii=False, indent=2)
     if len(preview) > 5000:
@@ -140,6 +140,7 @@ def confirm_mcp_tool(ui: ConsoleUI, server: str, tool: str, arguments: dict) -> 
         f"[bold]Server:[/bold] {escape(server)}\n"
         f"[bold]Remote tool:[/bold] {escape(tool)}\n\n"
         "[bold yellow]External MCP tool call[/bold yellow]\n"
+        f"[bold]Local risk assessment:[/bold] {escape((risk or {}).get('level', 'unknown').upper())} — {escape((risk or {}).get('reason', 'Risk assessment unavailable.'))}\n\n"
         "The remote server may read, modify, transmit, or delete external data. "
         "ZX Code cannot roll back remote side effects.\n\n"
         f"[bold]Arguments (sensitive fields redacted):[/bold]\n{escape(preview)}",
@@ -729,7 +730,7 @@ async def main():
         agent_config.max_iterations = max(1, min(args.max_iters, 200))
     mcp_store = MCPConfigStore(DEFAULT_CONFIG_DIR / "mcp_servers.json")
     mcp_manager = MCPManager(
-        approval_callback=lambda server, tool, arguments: confirm_mcp_tool(ui, server, tool, arguments)
+        approval_callback=lambda server, tool, arguments, risk: confirm_mcp_tool(ui, server, tool, arguments, risk)
     )
     try:
         saved_mcp_servers = mcp_store.load()
