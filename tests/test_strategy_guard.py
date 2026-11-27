@@ -3,7 +3,7 @@ from planner.strategy_guard import failure_fingerprint, is_strategy_diverse, sim
 
 def test_failure_fingerprint_is_stable_across_whitespace_and_timestamp_variants():
     first = failure_fingerprint(tool_name="shell", outcome="failed", error_text="boom\n  at 2026-11-27 10:12:13")
-    second = failure_fingerprint(tool_name="shell", outcome="failed", error_text=" boom at 2026-11-27 10:12:13 ")
+    second = failure_fingerprint(tool_name="shell", outcome="failed", error_text=" boom at 2026/11/28 11:12:14 ")
     assert first == second
     assert len(first) == 24
 

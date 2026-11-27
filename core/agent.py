@@ -904,7 +904,7 @@ class ZXAgentPro:
                     )
                     node.error_log = failure_evidence[:6000]
                     progress_evidence["failure_fingerprint"] = failure_fingerprint(
-                        tool_name=f"DAG node {node.id}", outcome=acceptance.evidence,
+                        tool_name="DAG node", outcome=acceptance.evidence,
                         error_text=node_result[:2500], verification_text=json.dumps(
                             verification_evidence, ensure_ascii=False, default=str)[:3500])
                     retry_limit = min(max(0, int(node.max_retries)), 1)
