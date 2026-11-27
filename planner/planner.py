@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 from .task_graph import TaskGraph, TaskNode, TaskGraphError
 from utils.validation import ValidationUtils
+from .strategy_guard import is_strategy_diverse
 
 
 class TaskPlanner:
@@ -121,7 +122,10 @@ class TaskPlanner:
                 return None
             if sum(len(d) for d in descriptions) > 6000:
                 return None
-            return [d.strip() for d in descriptions]
+            normalized_steps = [d.strip() for d in descriptions]
+            if not is_strategy_diverse(node_description, normalized_steps):
+                return None
+            return normalized_steps
         except Exception:
             return None
 

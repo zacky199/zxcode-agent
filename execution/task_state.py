@@ -158,6 +158,9 @@ class TaskStateStore:
                 "verification_status": str(progress.get("verification_status", "unknown"))[:40],
                 "workspace_changed": bool(progress.get("workspace_changed", False)),
             }
+            fingerprint = progress.get("failure_fingerprint")
+            if isinstance(fingerprint, str) and fingerprint:
+                safe["node_progress"]["failure_fingerprint"] = fingerprint[:24]
         if "execution_cursor" in payload and isinstance(payload["execution_cursor"], dict):
             from execution.resume import ExecutionCursor
             safe["execution_cursor"] = ExecutionCursor.from_dict(payload["execution_cursor"]).to_dict()

@@ -41,6 +41,7 @@ from execution.rollback import RollbackManager
 from execution.task_state import TaskStateStore
 from execution.acceptance import NodeAcceptanceContract
 from execution.progress import classify_node_progress
+from planner.strategy_guard import failure_fingerprint
 from execution.workspace_lock import WorkspaceLock, WorkspaceBusyError
 from execution.verification import NodeVerificationPlan
 from execution.resume import ExecutionCursor
@@ -902,6 +903,10 @@ class ZXAgentPro:
                         ]
                     )
                     node.error_log = failure_evidence[:6000]
+                    progress_evidence["failure_fingerprint"] = failure_fingerprint(
+                        tool_name=f"DAG node {node.id}", outcome=acceptance.evidence,
+                        error_text=node_result[:2500], verification_text=json.dumps(
+                            verification_evidence, ensure_ascii=False, default=str)[:3500])
                     retry_limit = min(max(0, int(node.max_retries)), 1)
                     # One bounded structural replan is allowed per failed strategy.
                     # Replanned child nodes carry replan_count=1 to prevent recursive DAG churn.
