@@ -40,6 +40,7 @@ from execution.journal import MutationJournal
 from execution.rollback import RollbackManager
 from execution.task_state import TaskStateStore
 from execution.acceptance import NodeAcceptanceContract
+from execution.progress import classify_node_progress
 from execution.workspace_lock import WorkspaceLock, WorkspaceBusyError
 from execution.verification import NodeVerificationPlan
 from execution.resume import ExecutionCursor
@@ -886,6 +887,13 @@ class ZXAgentPro:
                     verification=verification_evidence)
                 if not acceptance.accepted:
                     node_fatal[0] = True
+                progress_evidence = classify_node_progress(
+                    fatal=node_fatal[0], journal_closed=journal_closed,
+                    acceptance_accepted=acceptance.accepted, diff=node_diff if journal_closed else "",
+                    verification=verification_evidence)
+                node.progress_evidence = progress_evidence
+                yield {"type": "node_progress", "content": {
+                    "node_id": node.id, "progress": progress_evidence}}
                 if node_fatal[0]:
                     failure_evidence = (
                         acceptance.evidence + "\nCoder output:\n" + node_result[:2500]
@@ -913,7 +921,8 @@ class ZXAgentPro:
                         self._save_task_checkpoint(task_id, f"node_{node.id}_repair_pending", {
                             "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
                             "role_results": role_results, "test_results": [],
-                            "repair_attempt": node.retry_count}, cursor)
+                            "repair_attempt": node.retry_count,
+                            "node_progress": progress_evidence}, cursor)
                         continue
                     task_graph.update_status(node.id, "failed", result=node_result,
                                              error_log=acceptance.evidence,
@@ -925,7 +934,8 @@ class ZXAgentPro:
                     task_graph_data = self.planner.to_dict(task_graph)
                     self._save_task_checkpoint(task_id, "node_failed", {
                         "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
-                        "role_results": role_results, "test_results": [], "repair_attempt": node.retry_count}, cursor)
+                        "role_results": role_results, "test_results": [], "repair_attempt": node.retry_count,
+                        "node_progress": progress_evidence}, cursor)
                     final_box.append(node_result)
                     break
                 task_graph.update_status(node.id, "completed", result=node_result,
@@ -936,7 +946,8 @@ class ZXAgentPro:
                 task_graph_data = self.planner.to_dict(task_graph)
                 self._save_task_checkpoint(task_id, f"node_{node.id}_completed", {
                     "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
-                    "role_results": role_results, "test_results": [], "repair_attempt": 0}, cursor)
+                    "role_results": role_results, "test_results": [], "repair_attempt": 0,
+                    "node_progress": progress_evidence}, cursor)
                 final_box.append(f"[{node.id}] {node_result}")
                 yield {"type": "status", "content": f"DAG node completed: {node.id}"}
             if not task_graph.is_completed() and not fatal[0]:
