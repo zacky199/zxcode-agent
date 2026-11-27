@@ -246,3 +246,20 @@ def test_replan_metadata_and_progress_evidence_survive_checkpoint_allowlist(tmp_
     payload = store.load("adaptive-state")["state"]["payload"]
     assert payload["task_graph"]["nodes"][0]["replan_count"] == 1
     assert payload["node_progress"] == progress
+
+
+def test_independent_verifier_evidence_survives_checkpoint_sanitization(tmp_path):
+    store = TaskStateStore(tmp_path)
+    graph = {"nodes": [{"id": "step_1", "description": "task", "dependencies": [],
+        "status": "completed", "verification_evidence": {
+            "status": "passed", "reason": "tests passed", "results": [],
+            "independent_verification": {"status": "verified", "reason": "checked", "model": "review-model",
+                "criteria": [{"criterion": "endpoint behavior", "passed": True, "evidence": "test output matches"}]}}}]}
+    store.save("verifier-state", "node_completed", {"goal": "goal", "task_graph": graph,
+        "node_progress": {"status": "independently_verified", "independent_verification_status": "verified"}})
+    payload = store.load("verifier-state")["state"]["payload"]
+    evidence = payload["task_graph"]["nodes"][0]["verification_evidence"]["independent_verification"]
+    assert evidence["status"] == "verified"
+    assert evidence["model"] == "review-model"
+    assert evidence["criteria"][0]["passed"] is True
+    assert payload["node_progress"]["independent_verification_status"] == "verified"

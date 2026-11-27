@@ -44,6 +44,7 @@ from execution.progress import classify_node_progress
 from planner.strategy_guard import failure_fingerprint
 from execution.workspace_lock import WorkspaceLock, WorkspaceBusyError
 from execution.verification import NodeVerificationPlan
+from execution.independent_verifier import run_independent_verifier
 from execution.resume import ExecutionCursor
 from core.roles import parse_review_findings, parse_test_commands
 from execution.test_runner import TesterRunner
@@ -881,6 +882,18 @@ class ZXAgentPro:
                             "reason": f"verification plan rejected: {type(exc).__name__}: {str(exc)[:300]}"}
                     yield {"type": "node_verification", "content": {
                         "node_id": node.id, "verification": verification_evidence}}
+                independent_verification = {"status": "not_configured", "reason": "no distinct verifier provider configured", "criteria": []}
+                if journal_closed and not node_fatal[0]:
+                    independent_verification = await run_independent_verifier(
+                        self.roles, objective=user_prompt, node_task=node.description,
+                        coder_report=node_result, command_evidence=verification_evidence,
+                        diff_evidence=node_diff)
+                    if independent_verification.get("status") != "not_configured":
+                        verification_evidence["independent_verification"] = independent_verification
+                        if independent_verification.get("status") == "failed":
+                            verification_evidence["status"] = "failed"
+                        yield {"type": "independent_verification", "content": {
+                            "node_id": node.id, "verification": independent_verification}}
                 node.verification_evidence = verification_evidence
                 loop_fatal = node_fatal[0]
                 acceptance = NodeAcceptanceContract.evaluate(

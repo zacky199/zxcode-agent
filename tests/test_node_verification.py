@@ -85,3 +85,21 @@ def test_planner_rejects_oversized_node_verification_command():
     graph = asyncio.run(TaskPlanner(callback).create_plan("verify project"))
     assert graph.fallback_used
     assert graph.nodes["step_1"].verification_commands == []
+
+
+def test_independent_verifier_requires_valid_structured_evidence():
+    from execution.independent_verifier import parse_verifier_result
+    verified = parse_verifier_result('{"verdict":"verified","reason":"ok","criteria":[{"criterion":"feature works","passed":true,"evidence":"test passed"}]}')
+    assert verified["status"] == "verified"
+    failed = parse_verifier_result('{"verdict":"verified","criteria":[{"criterion":"security","passed":false,"evidence":"not checked"}]}')
+    assert failed["status"] == "failed"
+    inconclusive = parse_verifier_result("not json")
+    assert inconclusive["status"] == "inconclusive"
+
+
+def test_independent_verifier_rejects_verdict_conflicts_and_bad_bounds():
+    from execution.independent_verifier import parse_verifier_result
+    contradictory = parse_verifier_result('{"verdict":"failed","criteria":[{"criterion":"a","passed":true}]}')
+    assert contradictory["status"] == "inconclusive"
+    no_criteria = parse_verifier_result('{"verdict":"verified","criteria":[]}')
+    assert no_criteria["status"] == "inconclusive"

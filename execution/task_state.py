@@ -131,6 +131,18 @@ class TaskStateStore:
                                 "stderr": str(entry.get("stderr", ""))[:3000],
                             } for entry in results if isinstance(entry, dict)][:5] if isinstance(results, list) else [],
                         }
+                        independent = verification.get("independent_verification")
+                        if isinstance(independent, dict):
+                            criteria = independent.get("criteria", [])
+                            item["verification_evidence"]["independent_verification"] = {
+                                "status": str(independent.get("status", "unknown"))[:40],
+                                "reason": str(independent.get("reason", ""))[:1000],
+                                "model": str(independent.get("model", ""))[:120],
+                                "criteria": [{"criterion": str(c.get("criterion", ""))[:1000],
+                                    "passed": bool(c.get("passed", False)),
+                                    "evidence": str(c.get("evidence", ""))[:1000]}
+                                    for c in criteria if isinstance(c, dict)][:8] if isinstance(criteria, list) else [],
+                            }
                     safe_nodes.append(item)
                 safe["task_graph"] = {"nodes": safe_nodes}
         if "role_results" in payload:
@@ -158,6 +170,9 @@ class TaskStateStore:
                 "verification_status": str(progress.get("verification_status", "unknown"))[:40],
                 "workspace_changed": bool(progress.get("workspace_changed", False)),
             }
+            independent_status = progress.get("independent_verification_status")
+            if isinstance(independent_status, str) and independent_status:
+                safe["node_progress"]["independent_verification_status"] = independent_status[:40]
             fingerprint = progress.get("failure_fingerprint")
             if isinstance(fingerprint, str) and fingerprint:
                 safe["node_progress"]["failure_fingerprint"] = fingerprint[:24]

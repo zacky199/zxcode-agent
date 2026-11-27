@@ -92,3 +92,27 @@ async def test_same_model_fallback_does_not_claim_independent_review(tmp_path, m
 
     assert "reviewer" not in roles
     assert reviewer.complete_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_node_verification_invokes_distinct_verifier_provider(tmp_path, monkeypatch):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    primary = RoleProvider("primary")
+    verifier_response = ('{"verdict":"verified","reason":"reviewed diff and tests",'
+        '"criteria":[{"criterion":"requested implementation present","passed":true,"evidence":"diff confirms file change"}]}')
+    providers = {
+        "planner": RoleProvider("planner"),
+        "coder": RoleProvider("coder"),
+        "verifier": RoleProvider("verifier", verifier_response),
+    }
+    agent = ZXAgentPro(primary, workspace, role_router=RoleRouter(providers),
+        config=AgentConfig(store_tool_memory=False))
+    monkeypatch.setattr(agent.tool_engine, "create_mutation_journal", lambda **kwargs: FakeJournal())
+    events = [event async for event in agent.chat_stream("implement a feature")]
+    independent_events = [e for e in events if e["type"] == "independent_verification"]
+    assert len(independent_events) == 1
+    result = independent_events[0]["content"]["verification"]
+    assert result["status"] == "verified"
+    assert result["model"] == "verifier"
+    assert providers["verifier"].complete_calls == 1

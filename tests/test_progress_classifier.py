@@ -38,3 +38,23 @@ def test_fatal_execution_is_failed():
 def test_unclosed_journal_is_uncertain_even_if_execution_was_fatal():
     result = classify(fatal=True, journal_closed=False)
     assert result["status"] == "uncertain"
+
+
+def test_independent_verifier_pass_marks_node_independently_verified():
+    result = classify(diff="change", verification={"status": "passed",
+        "independent_verification": {"status": "verified"}})
+    assert result["status"] == "independently_verified"
+    assert result["independent_verification_status"] == "verified"
+
+
+def test_independent_verifier_failure_blocks_progress():
+    result = classify(diff="change", verification={"status": "passed",
+        "independent_verification": {"status": "failed"}})
+    assert result["status"] == "failed"
+
+
+def test_independent_verification_status_is_checkpoint_friendly():
+    result = classify(diff="some change", verification={"status": "passed",
+        "independent_verification": {"status": "inconclusive"}})
+    assert result["independent_verification_status"] == "inconclusive"
+    assert result["status"] == "workspace_changed"
