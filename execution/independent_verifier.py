@@ -39,6 +39,32 @@ def parse_verifier_result(raw: str) -> dict[str, Any]:
 
 
 
+def format_verifier_repair_feedback(result: dict[str, Any] | None) -> str:
+    """Render bounded, criterion-level feedback for repair/replanning without inventing fixes."""
+    if not isinstance(result, dict):
+        return "Independent verifier feedback: unavailable or malformed evidence."
+    status = str(result.get("status", "inconclusive"))[:40]
+    reason = str(result.get("reason", ""))[:MAX_TEXT]
+    criteria = result.get("criteria", [])
+    lines = [f"Independent verifier status: {status}"]
+    if reason:
+        lines.append(f"Verifier reason: {reason}")
+    if isinstance(criteria, list):
+        for entry in criteria[:MAX_CRITERIA]:
+            if not isinstance(entry, dict):
+                continue
+            passed = entry.get("passed") is True
+            label = "PASS" if passed else "FAIL/UNCONFIRMED"
+            criterion = str(entry.get("criterion", "(unnamed criterion)"))[:MAX_TEXT]
+            evidence = str(entry.get("evidence", ""))[:MAX_TEXT]
+            lines.append(f"- [{label}] {criterion}; evidence: {evidence or '(none supplied)'}")
+    if status == "inconclusive":
+        lines.append("Do not treat this as proof of correctness. Obtain stronger, observable evidence before claiming completion.")
+    elif status == "failed":
+        lines.append("Address failed criteria and add/execute focused verification. Do not merely restate the verifier's findings.")
+    return "\n".join(lines)[:6000]
+
+
 async def run_independent_verifier(roles: Any, *, objective: str, node_task: str,
                                   coder_report: str, command_evidence: dict,
                                   diff_evidence: str) -> dict[str, Any]:

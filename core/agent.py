@@ -915,6 +915,11 @@ class ZXAgentPro:
                             verification_evidence, ensure_ascii=False, default=str)[:3500
                         ]
                     )
+                    independent = verification_evidence.get("independent_verification")
+                    if isinstance(independent, dict):
+                        from execution.independent_verifier import format_verifier_repair_feedback
+                        failure_evidence += "\n\nVerifier repair guidance (evidence only):\n" + format_verifier_repair_feedback(independent)
+                    failure_evidence = failure_evidence[:9000]
                     node.error_log = failure_evidence[:6000]
                     progress_evidence["failure_fingerprint"] = failure_fingerprint(
                         tool_name="DAG node", outcome=acceptance.evidence,
