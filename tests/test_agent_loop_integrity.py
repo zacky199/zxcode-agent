@@ -460,3 +460,41 @@ async def test_loop_stops_on_alternating_consecutive_tool_failures(tmp_path):
     assert provider.calls <= 3
     assert len(failures) == 2
     assert any("repeated tool failures" in str(status).lower() for status in statuses)
+
+
+@pytest.mark.asyncio
+async def test_uncertain_journal_outcome_does_not_trigger_automatic_repair(tmp_path):
+    class UncertainProvider(RoutedProvider):
+        def __init__(self):
+            super().__init__("uncertain-provider")
+            self.stream_calls = 0
+
+        async def complete_async(self, system, messages, tools=None):
+            self.complete_calls += 1
+            return Response('{"objective":"uncertain outcome","steps":[{"description":"finish task","depends_on":[]}]}' )
+
+        async def stream_complete_async(self, system, messages, tools=None):
+            self.stream_calls += 1
+            yield {"type": "text", "content": "partial execution output"}
+            yield {"type": "done", "content": ""}
+
+    class UnclosedJournal:
+        def review_context(self, max_chars=30000):
+            return ""
+
+        def close(self):
+            raise RuntimeError("journal close failure")
+
+    workspace = tmp_path / "uncertain-journal"
+    workspace.mkdir()
+    provider = UncertainProvider()
+    agent = ZXAgentPro(provider, workspace, config=AgentConfig(store_tool_memory=False))
+    agent.tool_engine.create_mutation_journal = lambda **kwargs: UnclosedJournal()
+    events = [event async for event in agent.chat_stream("perform a task that may mutate files")]
+
+
+    assert provider.stream_calls == 1, "uncertain journal state must not automatically retry mutations"
+    progress = [event["content"]["progress"] for event in events if event["type"] == "node_progress"]
+    assert progress and progress[0]["status"] == "uncertain"
+    saved_graph = agent.task_state.load()["state"]["payload"]["task_graph"]
+    assert saved_graph["nodes"][0]["status"] == "failed"

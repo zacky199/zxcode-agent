@@ -903,7 +903,7 @@ class ZXAgentPro:
                     )
                     node.error_log = failure_evidence[:6000]
                     retry_limit = min(max(0, int(node.max_retries)), 1)
-                    if not loop_fatal and node.retry_count < retry_limit:
+                    if journal_closed and not loop_fatal and node.retry_count < retry_limit:
                         node.retry_count += 1
                         node.description = self.repairer.build_repair_instruction(
                             failure_evidence, attempt=node.retry_count,
