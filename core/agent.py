@@ -903,6 +903,33 @@ class ZXAgentPro:
                     )
                     node.error_log = failure_evidence[:6000]
                     retry_limit = min(max(0, int(node.max_retries)), 1)
+                    # One bounded structural replan is allowed per failed strategy.
+                    # Replanned child nodes carry replan_count=1 to prevent recursive DAG churn.
+                    if journal_closed and not loop_fatal and node.replan_count < 1:
+                        new_subtasks = await self.planner.replan_failed_node(
+                            goal=user_prompt, node_description=node.description, evidence=failure_evidence)
+                        if new_subtasks:
+                            try:
+                                replacement_ids = task_graph.replace_node_with_subtasks(
+                                    node.id, new_subtasks, max_subtasks=3)
+                            except Exception as replan_exc:
+                                log.warning("adaptive replan rejected safely", extra={
+                                    "fields": {"node_id": node.id, "error": type(replan_exc).__name__}})
+                            else:
+                                steps = [task_graph.nodes[nid].description
+                                         for nid in task_graph.topological_order()]
+                                task_graph_data = self.planner.to_dict(task_graph)
+                                cursor.transition("planned", current_node_id=None, mutation_started=False)
+                                self._save_task_checkpoint(task_id, "node_replanned", {
+                                    "goal": user_prompt, "plan": steps, "task_graph": task_graph_data,
+                                    "role_results": role_results, "test_results": [],
+                                    "repair_attempt": 0, "replanned_from": node.id,
+                                    "replacement_nodes": replacement_ids,
+                                    "node_progress": progress_evidence}, cursor)
+                                yield {"type": "replan", "content": {
+                                    "failed_node": node.id, "replacement_nodes": replacement_ids,
+                                    "reason": "acceptance failure evidence", "bounded": True}}
+                                continue
                     if journal_closed and not loop_fatal and node.retry_count < retry_limit:
                         node.retry_count += 1
                         node.description = self.repairer.build_repair_instruction(

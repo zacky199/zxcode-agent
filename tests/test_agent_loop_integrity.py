@@ -498,3 +498,42 @@ async def test_uncertain_journal_outcome_does_not_trigger_automatic_repair(tmp_p
     assert progress and progress[0]["status"] == "uncertain"
     saved_graph = agent.task_state.load()["state"]["payload"]["task_graph"]
     assert saved_graph["nodes"][0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_acceptance_failure_adaptively_replans_into_sequential_subnodes(tmp_path):
+    class AdaptiveProvider(RoutedProvider):
+        def __init__(self):
+            super().__init__("adaptive-provider")
+            self.planner_calls = 0
+            self.stream_calls = 0
+
+        async def complete_async(self, system, messages, tools=None):
+            self.complete_calls += 1
+            self.planner_calls += 1
+            if self.planner_calls == 1:
+                return Response('{"objective":"adaptive test","steps":[{"description":"large original task","depends_on":[]}]}' )
+            return Response('{"steps":["inspect root cause","implement smaller change","verify outcome"]}')
+
+        async def stream_complete_async(self, system, messages, tools=None):
+            self.stream_calls += 1
+            if self.stream_calls == 1:
+                yield {"type": "done", "content": ""}  # force acceptance failure/replan
+            else:
+                yield {"type": "text", "content": f"subtask-{self.stream_calls} evidence"}
+                yield {"type": "done", "content": ""}
+
+    workspace = tmp_path / "adaptive-replan"
+    workspace.mkdir()
+    provider = AdaptiveProvider()
+    agent = ZXAgentPro(provider, workspace, config=AgentConfig(store_tool_memory=False))
+    events = [event async for event in agent.chat_stream("complete a multi-stage coding task")]
+    replan_events = [event for event in events if event["type"] == "replan"]
+    assert len(replan_events) == 1
+    assert replan_events[0]["content"]["replacement_nodes"] == [
+        "step_1_r1_1", "step_1_r1_2", "step_1_r1_3"]
+    assert provider.stream_calls == 4  # initial failed node + three replacement nodes
+    saved_graph = agent.task_state.load()["state"]["payload"]["task_graph"]
+    assert [n["status"] for n in saved_graph["nodes"]] == ["completed"] * 3
+    assert saved_graph["nodes"][1]["dependencies"] == ["step_1_r1_1"]
+    assert all(n["replan_count"] == 1 for n in saved_graph["nodes"])

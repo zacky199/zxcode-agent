@@ -231,3 +231,18 @@ def test_assess_recovery_blocks_journal_rollback_skips(tmp_path):
     decision = store.assess_recovery("rollback-skips")
     assert decision["action"] == "manual_reconciliation"
     assert decision["journal"]["rollback_skips"] == 1
+
+
+def test_replan_metadata_and_progress_evidence_survive_checkpoint_allowlist(tmp_path):
+    store = TaskStateStore(tmp_path)
+    graph = {"nodes": [{"id": "step_r1", "description": "smaller subtask",
+        "dependencies": [], "status": "completed", "replan_count": 1,
+        "retry_count": 0, "max_retries": 1}]}
+    progress = {"status": "workspace_changed", "reason": "diff observed",
+        "journal_closed": True, "acceptance_accepted": True,
+        "verification_status": "not_configured", "workspace_changed": True}
+    store.save("adaptive-state", "node_replanned", {
+        "goal": "goal", "task_graph": graph, "node_progress": progress})
+    payload = store.load("adaptive-state")["state"]["payload"]
+    assert payload["task_graph"]["nodes"][0]["replan_count"] == 1
+    assert payload["node_progress"] == progress

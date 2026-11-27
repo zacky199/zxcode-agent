@@ -101,6 +101,8 @@ class TaskStateStore:
                         item["retry_count"] = max(0, min(int(node.get("retry_count", 0)), 10))
                     if "max_retries" in node:
                         item["max_retries"] = max(0, min(int(node.get("max_retries", 3)), 10))
+                    if "replan_count" in node:
+                        item["replan_count"] = max(0, min(int(node.get("replan_count", 0)), 3))
                     acceptance = node.get("acceptance")
                     if isinstance(acceptance, dict):
                         checks = acceptance.get("checks", {})
@@ -146,6 +148,16 @@ class TaskStateStore:
                     for x in results if isinstance(x, dict)][:20] if isinstance(results, list) else []}
         if "repair_attempt" in payload:
             safe["repair_attempt"] = max(0, min(int(payload["repair_attempt"]), 10))
+        progress = payload.get("node_progress")
+        if isinstance(progress, dict):
+            safe["node_progress"] = {
+                "status": str(progress.get("status", "unknown"))[:40],
+                "reason": str(progress.get("reason", ""))[:500],
+                "journal_closed": bool(progress.get("journal_closed", False)),
+                "acceptance_accepted": bool(progress.get("acceptance_accepted", False)),
+                "verification_status": str(progress.get("verification_status", "unknown"))[:40],
+                "workspace_changed": bool(progress.get("workspace_changed", False)),
+            }
         if "execution_cursor" in payload and isinstance(payload["execution_cursor"], dict):
             from execution.resume import ExecutionCursor
             safe["execution_cursor"] = ExecutionCursor.from_dict(payload["execution_cursor"]).to_dict()

@@ -107,3 +107,28 @@ def test_planner_accepts_descriptions_at_the_character_limits():
     graph = __import__("asyncio").run(TaskPlanner(callback).create_plan("goal"))
     assert not graph.fallback_used
     assert len(graph.nodes) == 5
+
+
+def test_failed_node_replan_replaces_node_and_preserves_prerequisites_and_dependents():
+    graph = graph_with([
+        TaskNode("base", "foundation"),
+        TaskNode("broken", "failed implementation", ["base"], status="failed", replan_count=0),
+        TaskNode("next", "continue after repair", ["broken"]),
+        TaskNode("other", "unrelated independent work"),
+    ])
+    created = graph.replace_node_with_subtasks("broken", ["inspect root cause", "implement smaller fix", "verify result"])
+    assert created == ["broken_r1_1", "broken_r1_2", "broken_r1_3"]
+    assert graph.nodes[created[0]].dependencies == ["base"]
+    assert graph.nodes[created[1]].dependencies == [created[0]]
+    assert graph.nodes[created[2]].dependencies == [created[1]]
+    assert graph.nodes["next"].dependencies == [created[-1]]
+    assert graph.nodes["other"].dependencies == []
+    graph.validate()
+
+
+def test_replan_graph_replacement_rejects_invalid_subtask_list_atomically():
+    graph = graph_with([TaskNode("failed", "failed node", status="failed"), TaskNode("desc", "dependent", ["failed"])])
+    before = TaskPlanner.to_dict(graph)
+    with pytest.raises(TaskGraphError):
+        graph.replace_node_with_subtasks("failed", ["only one subtask"])
+    assert TaskPlanner.to_dict(graph) == before

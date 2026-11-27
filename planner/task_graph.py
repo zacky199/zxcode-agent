@@ -15,6 +15,7 @@ class TaskNode:
     error_log: str = ""
     retry_count: int = 0
     max_retries: int = 3
+    replan_count: int = 0
     acceptance: dict = field(default_factory=dict)
     verification_commands: List[str] = field(default_factory=list)
     verification_evidence: dict = field(default_factory=dict)
@@ -120,6 +121,44 @@ class TaskGraph:
             self.nodes[node_id].acceptance = dict(acceptance)
         if verification_evidence is not None:
             self.nodes[node_id].verification_evidence = dict(verification_evidence)
+
+    def replace_node_with_subtasks(self, node_id: str, descriptions: List[str],
+                                  *, max_subtasks: int = 3) -> List[str]:
+        """Replace one failed node with a bounded sequential sub-DAG, preserving its edges.
+
+        Descendants depend on the final replacement node; prerequisites are inherited
+        by the first replacement node. The operation is validated before committing.
+        """
+        if node_id not in self.nodes:
+            raise TaskGraphError(f"unknown node to replan: {node_id}")
+        original = self.nodes[node_id]
+        if original.status not in {"failed", "pending", "running"}:
+            raise TaskGraphError("only failed, pending, or running nodes may be replanned")
+        if not isinstance(descriptions, list) or not 2 <= len(descriptions) <= max_subtasks:
+            raise TaskGraphError(f"replan must contain 2 to {max_subtasks} subtasks")
+        if any(not isinstance(d, str) or not d.strip() or len(d) > 2000 for d in descriptions):
+            raise TaskGraphError("replan contains invalid or oversized subtask descriptions")
+        suffix = max(1, original.replan_count + 1)
+        new_ids = [f"{node_id}_r{suffix}_{i + 1}" for i in range(len(descriptions))]
+        if any(new_id in self.nodes for new_id in new_ids):
+            raise TaskGraphError("replan generated colliding node IDs")
+        candidate = dict(self.nodes)
+        del candidate[node_id]
+        new_nodes = []
+        for i, (new_id, description) in enumerate(zip(new_ids, descriptions)):
+            deps = list(original.dependencies) if i == 0 else [new_ids[i - 1]]
+            new_nodes.append(TaskNode(id=new_id, description=description.strip(), dependencies=deps,
+                                   max_retries=1, replan_count=suffix))
+        for existing in candidate.values():
+            existing.dependencies = [new_ids[-1] if dep == node_id else dep
+                                    for dep in existing.dependencies]
+        for replacement in new_nodes:
+            candidate[replacement.id] = replacement
+        candidate_graph = TaskGraph()
+        candidate_graph.nodes = candidate
+        candidate_graph.validate()
+        self.nodes = candidate
+        return new_ids
 
     def is_completed(self) -> bool:
         return bool(self.nodes) and all(n.status == "completed" for n in self.nodes.values())
